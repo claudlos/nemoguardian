@@ -3,7 +3,7 @@
 **Hackathon:** Hermes Agent Accelerated Business Hackathon · NVIDIA × Stripe × Nous Research
 **Submission deadline:** EOD Tuesday, June 30, 2026
 **Built by:** Carlos
-**Repo:** `/home/carlos/hermes-business-hackathon/nemoguardian`
+**Repo:** `/home/carlos/nemoguardian`
 
 ---
 
@@ -39,11 +39,10 @@ A Python package + FastAPI server + Docker image that:
 
 | Stage | Model | Source | Cost | Latency |
 |---|---|---|---|---|
-| 0. Pre-filter | `nvidia/NemoGuard-JailbreakDetect` | NVIDIA | <5ms | binary classifier |
-| 1. Fast triage | `Qwen/Qwen3Guard-Gen-0.6B` | Qwen team (Apache 2.0) | ~30ms | 119 languages, 3-tier |
-| 1b. Live chat | `Qwen/Qwen3Guard-Stream-0.6B` | Qwen team (Apache 2.0) | ~1ms/token | streaming token-level |
-| 2. Custom policy | `nvidia/Nemotron-Content-Safety-Reasoning-4B` | NVIDIA (Jan 2026) | ~200ms | reasoning-on mode |
-| 3. Triage | `nvidia/nemotron-3-ultra-220b-a12b` | NVIDIA NIM | ~300ms | adjudicates disagreements |
+| 1. Fast stream | `Qwen/Qwen3Guard-Stream-0.6B` | Qwen team (Apache 2.0) | ~1ms/token | streaming token-level |
+| 2. Full-doc guard | `Qwen/Qwen3Guard-Gen-4B` | Qwen team (Apache 2.0) | ~50ms | 119 languages, 3-tier |
+| 3. Custom policy | `nvidia/Nemotron-Content-Safety-Reasoning-4B` | NVIDIA (Jan 2026) | ~200ms | reasoning-on mode |
+| 4. Deep triage | `nvidia/nemotron-3-ultra-220b-a12b` | NVIDIA NIM / OpenRouter | ~300ms | adjudicates disagreements |
 
 Total VRAM at FP16: **~17.5GB minimum, 24GB comfortable, 32GB headroom.**
 
@@ -83,7 +82,7 @@ trade-off that fits them. The demo UI (`/demo`) shows the cost comparison table 
 
 **Real, shipping:**
 - The FastAPI server with 19 endpoints
-- Full cascade orchestration (triage → guard stack → aggregator → policy gate)
+- Full cascade orchestration (guard stack → optional deep triage → aggregator → policy gate)
 - Multi-model aggregator with weighted voting + fail-closed override
 - NemoClaw YAML policy gate with Discord / Twitch / generic presets
 - Stripe subscription tiers + checkout + webhook + metered usage
@@ -146,6 +145,6 @@ and ships with a Stripe + multi-cloud story that's real, not mocked.
 
 ## Links
 
-- Repo: `/home/carlos/hermes-business-hackathon/nemoguardian`
+- Repo: `/home/carlos/nemoguardian`
 - Demo video: (to be recorded by Jun 30)
 - Substack / writeup: (to be posted)

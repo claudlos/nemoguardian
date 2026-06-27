@@ -179,12 +179,12 @@ nemoguardian/
 ├── nemoguardian/
 │   ├── __init__.py
 │   ├── server.py              ← FastAPI app
-│   ├── cascade.py             ← orchestration: triage → guard stack → aggregator
+│   ├── cascade.py             ← orchestration: guard stack → optional triage → aggregator
 │   ├── aggregator.py          ← weighted multi-model verdict combiner
-│   ├── models/
+│   ├── models/                ← lazy Hugging Face / OpenAI-compatible wrappers
 │   │   ├── qwen3_guard.py     ← Qwen3Guard-Gen + Stream wrappers
 │   │   ├── nemotron_csr.py    ← Nemotron Content Safety Reasoning 4B
-│   │   └── nemotron_triage.py ← Nemotron 3 Ultra cheap triage
+│   │   └── nemotron_triage.py ← Nemotron 3 Ultra deep triage
 │   ├── policy/
 │   │   ├── nemoclaw.py        ← YAML policy → verdict gate
 │   │   └── presets.py         ← discord.yaml, twitch.yaml, generic.yaml
@@ -195,8 +195,11 @@ nemoguardian/
 ├── tests/
 ├── docs/
 │   └── MODEL_CATALOG.md       ← full model survey (see docs/)
-└── examples/
-    └── discord_bot.py         ← runnable demo bot
+├── demo/
+│   ├── index.html             ← browser moderation console
+│   └── console_demo.py        ← terminal demo
+└── scripts/
+    └── real_model_smoke.py    ← GPU-host smoke check
 ```
 
 ## The submission video plan (60–90 seconds)

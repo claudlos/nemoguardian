@@ -11,7 +11,7 @@ dist
 build
 .coverage
 htmlcov
-models
-checkpoints
+/models
+/checkpoints
 *.gguf
 *.safetensors

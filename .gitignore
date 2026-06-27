@@ -13,8 +13,8 @@ build/
 venv/
 
 # Model caches
-models/
-checkpoints/
+/models/
+/checkpoints/
 *.gguf
 *.safetensors
 
