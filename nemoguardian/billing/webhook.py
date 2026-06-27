@@ -18,6 +18,7 @@ import hashlib
 import hmac
 import json
 import os
+import time
 from contextlib import suppress
 from datetime import datetime, timezone
 from typing import Any
@@ -28,6 +29,7 @@ from nemoguardian.billing import db
 from nemoguardian.billing.plans import Tier
 
 WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+DEFAULT_SIGNATURE_TOLERANCE_SECONDS = 300
 
 
 def get_webhook_secret() -> str:
@@ -35,24 +37,35 @@ def get_webhook_secret() -> str:
     return os.environ.get("STRIPE_WEBHOOK_SECRET", "") or WEBHOOK_SECRET
 
 
-def verify_signature(payload: bytes, signature_header: str) -> bool:
+def verify_signature(
+    payload: bytes,
+    signature_header: str,
+    *,
+    tolerance_seconds: int = DEFAULT_SIGNATURE_TOLERANCE_SECONDS,
+    now: float | None = None,
+) -> bool:
     """Verify the Stripe-Signature header. Returns True if valid.
 
     Stripe's scheme: HMAC-SHA256 of (timestamp.payload), prefixed by `t=`.
     """
     secret = get_webhook_secret()
     if not secret:
-        # Demo mode: skip verification but log it.
-        return True
+        # Fail closed by default. Local tests/demos that need unsigned webhook
+        # payloads must opt in explicitly.
+        return _env_bool("NEMOGUARDIAN_INSECURE_WEBHOOK_DEMO", False)
     if not signature_header:
         return False
     try:
-        parts = dict(p.split("=", 1) for p in signature_header.split(","))
+        parts = dict(p.strip().split("=", 1) for p in signature_header.split(","))
         timestamp = parts.get("t", "")
         sig = parts.get("v1", "")
+        ts = int(timestamp)
     except Exception:
         return False
-    signed_payload = f"{timestamp}.{payload.decode('utf-8')}".encode()
+    current = time.time() if now is None else now
+    if abs(current - ts) > tolerance_seconds:
+        return False
+    signed_payload = f"{timestamp}.".encode() + payload
     expected = hmac.new(
         secret.encode(), signed_payload, hashlib.sha256
     ).hexdigest()
@@ -135,13 +148,15 @@ def _on_checkout_completed(session: dict[str, Any]) -> dict[str, Any]:
             ),
         )
 
-    # Provision an API key for the new tier.
-    raw_key, _ = db.create_api_key(customer.id, label=f"{tier.value} welcome key")
+    # Provision an API key for the new tier. Do not return the raw key from a
+    # webhook response; production delivery should be out-of-band or claim-token based.
+    _raw_key, key_record = db.create_api_key(customer.id, label=f"{tier.value} welcome key")
     return {
         "handled": True,
         "customer_id": customer.id,
         "tier": tier.value,
-        "api_key_provisioned": raw_key,  # in real life: email this, don't return it
+        "api_key_provisioned": True,
+        "api_key_id": key_record.id,
     }
 
 
@@ -192,7 +207,15 @@ _HANDLERS = {
 }
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 __all__ = [
+    "DEFAULT_SIGNATURE_TOLERANCE_SECONDS",
     "WEBHOOK_SECRET",
     "get_webhook_secret",
     "handle_stripe_webhook",

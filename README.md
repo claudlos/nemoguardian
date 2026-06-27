@@ -69,7 +69,7 @@ python3 -m venv .venv
 pip install -e ".[dev]"
 
 # Start the server. The first moderation call downloads model weights.
-python -m nemoguardian serve --port 8000
+NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT=1 python -m nemoguardian serve --port 8000
 
 # Open the hackathon demo UI.
 open http://localhost:8000/demo
@@ -95,8 +95,9 @@ make docker-run
 ```
 
 Production API calls use `POST /v1/moderate` with `Authorization: Bearer <nmg_...>`
-so billing and tier limits can run. The `/demo/moderate` endpoint is for the
-hackathon recording path and can be disabled with `NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT=0`.
+so billing and tier limits can run. The `/demo/moderate` endpoint is disabled by
+default; enable it only for controlled local or recording hosts with
+`NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT=1`.
 For self-hosted Docker, a non-placeholder `NEMOGUARDIAN_API_KEY` also bootstraps
 a local self-hosted customer so `/v1/moderate` works on a fresh instance without
 manually seeding SQLite.

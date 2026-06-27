@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -24,6 +28,7 @@ def isolated_db(monkeypatch, tmp_path):
     monkeypatch.delenv("NEMOGUARDIAN_SELF_HOSTED_EMAIL", raising=False)
     monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
     monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
+    monkeypatch.delenv("NEMOGUARDIAN_INSECURE_WEBHOOK_DEMO", raising=False)
     billing_db._conn = None
     billing_db.init_db(str(db_path))
     yield
@@ -115,7 +120,7 @@ def test_checkout_creates_customer(client):
     assert customer is not None
 
 
-def test_webhook_checkout_completed_upgrades_tier(client):
+def test_webhook_checkout_completed_upgrades_tier(client, monkeypatch):
     # First create the customer via checkout.
     client.post("/billing/checkout", json={"email": "buyer@example.com", "tier": "free"})
     customer = billing_db.get_customer_by_email("buyer@example.com")
@@ -138,11 +143,27 @@ def test_webhook_checkout_completed_upgrades_tier(client):
             }
         },
     }
-    r = client.post("/billing/webhook", json=payload)
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
+    body, signature = _signed_payload(payload, "whsec_test")
+    r = client.post(
+        "/billing/webhook",
+        content=body,
+        headers={"Stripe-Signature": signature, "Content-Type": "application/json"},
+    )
     assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["api_key_provisioned"] is True
+    assert isinstance(body["api_key_id"], int)
+    assert "nmg_" not in r.text
     upgraded = billing_db.get_customer(customer.id)
     assert upgraded.tier == "pro"
     assert upgraded.stripe_customer_id == "cus_test_X"
+
+
+def test_webhook_signature_required_when_secret_missing(client):
+    payload = {"type": "checkout.session.completed", "data": {"object": {}}}
+    r = client.post("/billing/webhook", json=payload)
+    assert r.status_code == 400
 
 
 def test_webhook_signature_required_when_secret_set(client, monkeypatch):
@@ -155,6 +176,26 @@ def test_webhook_signature_required_when_secret_set(client, monkeypatch):
     )
     # No signature but webhook secret set → 400
     assert r.status_code == 400
+
+
+def test_webhook_rejects_replayed_signature(client, monkeypatch):
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
+    payload = {"type": "checkout.session.completed", "data": {"object": {}}}
+    body, signature = _signed_payload(payload, "whsec_test", timestamp=1)
+    r = client.post(
+        "/billing/webhook",
+        content=body,
+        headers={"Stripe-Signature": signature, "Content-Type": "application/json"},
+    )
+    assert r.status_code == 400
+
+
+def test_unsigned_webhook_requires_explicit_insecure_demo_opt_in(client, monkeypatch):
+    monkeypatch.setenv("NEMOGUARDIAN_INSECURE_WEBHOOK_DEMO", "1")
+    payload = {"type": "customer.subscription.deleted", "data": {"object": {}}}
+    r = client.post("/billing/webhook", json=payload)
+    assert r.status_code == 200
+    assert r.json()["received"] is True
 
 
 def test_portal_returns_demo_session_for_authenticated_customer(client):
@@ -312,3 +353,10 @@ def test_usage_endpoint_returns_allowance(client):
     body = r.json()
     assert body["allowance"] == 1_000
     assert body["tier"] == "free"
+
+
+def _signed_payload(payload: dict, secret: str, *, timestamp: int | None = None) -> tuple[bytes, str]:
+    body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    ts = int(time.time()) if timestamp is None else timestamp
+    digest = hmac.new(secret.encode(), f"{ts}.".encode() + body, hashlib.sha256).hexdigest()
+    return body, f"t={ts},v1={digest}"

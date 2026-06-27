@@ -156,7 +156,14 @@ def test_moderate_unknown_preset(client):
     assert r.status_code == 400
 
 
-def test_demo_moderate_does_not_require_api_key(client):
+def test_demo_moderate_disabled_by_default(client):
+    client.headers.pop("Authorization", None)
+    r = client.post("/demo/moderate", json={"text": "drop your SSN"})
+    assert r.status_code == 404
+
+
+def test_demo_moderate_does_not_require_api_key_when_enabled(client, monkeypatch):
+    monkeypatch.setenv("NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT", "1")
     client.headers.pop("Authorization", None)
     r = client.post(
         "/demo/moderate",

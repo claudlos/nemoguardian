@@ -59,7 +59,8 @@ agent infrastructure product.
 - FastAPI service and generated OpenAPI docs.
 - Production `/v1/moderate` API with billing auth and usage accounting.
 - Protected `/v1/moderate/stream` API for token-level moderation.
-- Unauthenticated `/demo/moderate` path for the recorded hackathon demo.
+- Unauthenticated `/demo/moderate` path for the recorded hackathon demo when
+  explicitly enabled on the recording host.
 - Real model wrappers for Qwen3Guard, Nemotron-CSR, and Nemotron triage.
 - Docker image and compose path for self-hosted GPU deployment.
 - Vast.ai live API client plus provider catalog and cost comparison table.
@@ -68,8 +69,9 @@ agent infrastructure product.
 
 - Non-Vast providers return static catalog entries unless their integrations are
   expanded later.
-- Stripe checkout, customer portal, and webhooks run in demo mode when Stripe
-  secrets are absent.
+- Stripe checkout and customer portal fall back to demo URLs when Stripe secrets
+  are absent. Webhooks reject unsigned payloads unless
+  `NEMOGUARDIAN_INSECURE_WEBHOOK_DEMO=1` is explicitly set for local fixtures.
 - Billing/provisioning can run without real cloud credentials for local demos.
 - The final video should not be recorded until real-model smoke passes on the
   GPU host.

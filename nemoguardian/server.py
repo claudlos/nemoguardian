@@ -283,11 +283,11 @@ def _resolve_policy_engine(
 
 
 def _demo_endpoint_enabled() -> bool:
-    return os.environ.get("NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT", "1").strip().lower() not in {
-        "0",
-        "false",
-        "no",
-        "off",
+    return os.environ.get("NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
     }
 
 
