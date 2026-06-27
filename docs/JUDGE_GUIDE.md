@@ -106,7 +106,7 @@ Real:
 - `/v1/moderate` production API with auth, tier gates, and usage accounting.
 - `/v1/moderate/stream` production stream API with auth and usage accounting.
 - `/demo/moderate` recording endpoint backed by the same cascade.
-- Qwen3Guard, Nemotron-CSR, and Nemotron triage wrappers.
+- Qwen3Guard and Nemotron-CSR local wrappers, plus API-backed Nemotron triage.
 - NemoClaw-style policy presets.
 - Stripe-style checkout, webhook, plans, usage, and API-key database.
 - Vast.ai live client plus multi-provider offer registry.
@@ -117,6 +117,7 @@ Demo-mode or static:
 - Non-Vast providers return static catalog offers.
 - Billing/provisioning can simulate local flows without cloud credentials.
 - The final video and `demo-evidence.json` are not valid until real GPU smoke passes.
+  The GPU host runs the two 4B guard models locally; deep triage calls NVIDIA/OpenRouter.
 
 ## 5. Final Artifacts To Submit
 

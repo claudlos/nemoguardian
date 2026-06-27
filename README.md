@@ -55,11 +55,11 @@ the policy rule that fired (if any).
 | Qwen3Guard-Stream 0.6B (token-level) | ~1ms/token | streaming | obvious violations, PII, slurs as the LLM types |
 | Qwen3Guard-Gen 4B (full doc) | ~50ms | per-message | nuanced violations, multilingual (119 languages) |
 | Nemotron-CSR 4B (reasoning on) | ~200ms | per-message | custom policies ("no financial advice"), topic-following, jailbreak attempts |
-| Nemotron 3 Ultra triage | ~300ms | per-batch | explains disagreements between the two guard models |
+| Nemotron 3 Ultra triage | ~300ms | per-batch API call | explains disagreements between the two local guard models |
 
 The production API exposes `fast`, `standard`, and `deep` modes so callers can
 choose when to pay for the heavier reasoning path. The demo records `deep` mode
-explicitly to show the optional triage explanation.
+explicitly to show the optional API-backed triage explanation.
 
 ## Quickstart
 
@@ -128,7 +128,9 @@ NEMOGUARDIAN_TRIAGE_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
 
 `GET /health` reports the runtime device, configured model IDs, quantization
 flags, loaded model state, and triage provider so the recording can prove it is
-running the intended real-model path.
+running the intended real-model path. On a 24GB RTX 3090, Qwen3Guard-Gen-4B and
+Nemotron-CSR-4B run locally; Nemotron 3 Ultra is called through NVIDIA/OpenRouter
+and is not loaded onto the GPU.
 
 Before recording on the GPU host, run:
 
@@ -159,7 +161,7 @@ make final-submission-check FINAL_CHECK_FLAGS="--video-url https://<hosted-demo-
 
 - `fast` — Qwen3Guard-Stream only. Streaming token-level. ~1ms latency.
 - `standard` — Qwen3Guard-Gen + Nemotron-CSR. Reasoning is controlled by `NEMOGUARDIAN_REASONING`.
-- `deep` — All three + Nemotron 3 Ultra triage to explain disagreements. ~500ms per message.
+- `deep` — Local guard stack + API-backed Nemotron 3 Ultra triage to explain disagreements.
 
 ## What's real vs simulated for the demo
 
@@ -168,7 +170,7 @@ make final-submission-check FINAL_CHECK_FLAGS="--video-url https://<hosted-demo-
 - The `/demo` moderation console backed by the real cascade
 - Real Qwen3Guard-Gen 4B inference on CPU/GPU
 - Real Nemotron-CSR 4B with custom-policy mode (Reasoning On)
-- Nemotron 3 Ultra triage via NVIDIA/OpenRouter OpenAI-compatible API
+- API-backed Nemotron 3 Ultra triage via NVIDIA/OpenRouter OpenAI-compatible API
 - NemoClaw policy gate (yaml → decision)
 - Discord bot adapter with token-level streaming
 - Per-platform policy presets

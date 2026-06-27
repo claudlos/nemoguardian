@@ -102,7 +102,7 @@ Switch mode to `deep` and run the same example.
 Narration:
 
 ```text
-Deep mode adds Nemotron 3 Ultra triage for cases where the specialist guards
+Deep mode adds API-backed Nemotron 3 Ultra triage for cases where the specialist guards
 disagree or where the customer needs a richer explanation.
 ```
 

@@ -40,7 +40,8 @@ agent infrastructure product.
 
 - `nvidia/Nemotron-Content-Safety-Reasoning-4B` for custom-policy moderation.
 - `nvidia/nemotron-3-ultra-550b-a55b` through NVIDIA/OpenRouter-compatible API
-  for deep-mode disagreement triage.
+  for deep-mode disagreement triage. This 550B triage model is API-only; the
+  RTX 3090 hosts the 4B guard models locally.
 - NemoClaw-style YAML policy gate for platform-specific enforcement.
 - CUDA Docker image and GPU readiness checks for the real-model recording path.
 
@@ -61,7 +62,7 @@ agent infrastructure product.
 - Protected `/v1/moderate/stream` API for token-level moderation.
 - Unauthenticated `/demo/moderate` path for the recorded hackathon demo when
   explicitly enabled on the recording host.
-- Real model wrappers for Qwen3Guard, Nemotron-CSR, and Nemotron triage.
+- Real local wrappers for Qwen3Guard and Nemotron-CSR, plus API-backed Nemotron triage.
 - Docker image and compose path for self-hosted GPU deployment.
 - Vast.ai live API client plus provider catalog and cost comparison table.
 

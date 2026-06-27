@@ -1,12 +1,13 @@
-"""Cheap Nemotron 3 Ultra triage call.
+"""API-backed Nemotron 3 Ultra triage call.
 
 Used in `deep` mode to:
 - Summarize the disagreement between Qwen3Guard and Nemotron-CSR
 - Explain WHY the cascade is uncertain
 - Suggest a final verdict with reasoning for the audit log
 
-This is the only place a general-purpose Nemotron 3 Ultra call is used — moderation
-classification itself is left to the specialist guard models.
+This is the only place a general-purpose Nemotron 3 Ultra call is used. The
+550B triage model is not loaded on the demo GPU; the RTX 3090 runs the 4B guard
+models locally and calls NVIDIA/OpenRouter for deep-mode adjudication.
 """
 
 from __future__ import annotations

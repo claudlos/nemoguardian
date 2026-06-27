@@ -2,7 +2,8 @@
 
 This is the June 30 recording path for `nemoguardian`: real Qwen3Guard +
 Nemotron-CSR on a 24GB GPU, with optional Nemotron 3 Ultra triage through NVIDIA
-or OpenRouter.
+or OpenRouter. The 550B triage model is API-only in this setup; it is not loaded
+onto the RTX 3090.
 
 ## 1. Provision
 
@@ -66,6 +67,11 @@ NEMOGUARDIAN_TRIAGE_BASE_URL=https://openrouter.ai/api/v1
 NEMOGUARDIAN_TRIAGE_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
 ```
 
+If running directly inside a prebuilt Vast PyTorch image instead of the project
+Docker image, set `NEMOGUARDIAN_QUANTIZE=0` if 4-bit loading fails in the base
+image. The two 4B local models fit on a 24GB RTX 3090 in FP16; Nemotron 3 Ultra
+still runs through the API.
+
 ## 3. Build And Run
 
 ```bash
@@ -96,6 +102,7 @@ Expected:
 - `runtime_device` reports CUDA/GPU.
 - `model_config` shows Qwen3Guard-Gen-4B and Nemotron-CSR.
 - `triage_configured` is `true` when NVIDIA/OpenRouter key is set.
+- `triage_provider` reports `nvidia` or `openrouter`; the triage model is an API call, not a local 550B load.
 
 Run real-model smoke:
 
