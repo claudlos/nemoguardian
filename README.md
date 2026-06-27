@@ -1,5 +1,7 @@
 # nemoguardian
 
+[![CI](https://github.com/claudlos/nemoguardian/actions/workflows/ci.yml/badge.svg)](https://github.com/claudlos/nemoguardian/actions/workflows/ci.yml)
+
 > **Multi-model LLM moderation, plug-and-play.**
 > Built on Nemotron Content Safety Reasoning + Qwen3Guard + cheap Nemotron 3 Ultra triage.
 

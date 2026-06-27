@@ -19,6 +19,12 @@ git log --oneline --decorate -1
 git status -sb
 ```
 
+- Public CI is green for the latest commit:
+
+```bash
+gh run list --workflow ci.yml --limit 1
+```
+
 ## 2. Local Verification
 
 Run these from the repo root:
