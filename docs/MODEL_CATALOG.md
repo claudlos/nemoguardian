@@ -1,7 +1,7 @@
 # nemoguardian — Open-Source LLM Safety Model Catalog
 
 > **Hackathon:** Hermes Agent Accelerated Business Hackathon (NVIDIA × Stripe × Nous Research, deadline 2026-06-30)
-> **Project:** `nemoguardian` — a multi-model LLM moderation service stacking NVIDIA Nemotron Content Safety + Qwen3Guard + cheap Nemotron triage.
+> **Project:** `nemoguardian` — a multi-model LLM moderation service stacking NVIDIA Nemotron Content Safety + Qwen3Guard + optional Nemotron triage.
 > **Demo target:** Discord / Twitch / social platforms.
 > **Constraints:** Open-source only. No paid API keys for the moderation models (NVIDIA NIM free endpoint acceptable as a fallback). Local laptop GPU is **RTX 3050 Ti 4 GB**; Colab A100 40 GB available for bigger models.
 > **Catalog snapshot:** late June 2026.

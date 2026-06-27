@@ -3,7 +3,7 @@
 [![CI](https://github.com/claudlos/nemoguardian/actions/workflows/ci.yml/badge.svg)](https://github.com/claudlos/nemoguardian/actions/workflows/ci.yml)
 
 > **Multi-model LLM moderation, plug-and-play.**
-> Built on Nemotron Content Safety Reasoning + Qwen3Guard + cheap Nemotron 3 Ultra triage.
+> Built on Nemotron Content Safety Reasoning + Qwen3Guard + optional Nemotron 3 Ultra triage.
 
 **Hackathon:** Hermes Agent Accelerated Business Hackathon · NVIDIA × Stripe × Nous Research · June 30, 2026
 
@@ -25,15 +25,18 @@ The architecture:
 [text or token stream]
         │
         ▼
-   Nemotron 3 Ultra TRIAGE      ← cheap, decides which downstream passes to run
-        │
-   ┌────┼────────────────┐
-   ▼    ▼                ▼
- Qwen3  Nemotron-CSR    Qwen3
- Guard  Reasoning 4B    Guard
- -Stream (full doc)     -Gen
-   │    │                │
-   └────┼────────────────┘
+ ┌────────────────────────────────────┐
+ │ mode=fast                          │
+ │ Qwen3Guard-Stream                  │
+ └────────────────────────────────────┘
+ ┌────────────────────────────────────┐
+ │ mode=standard                      │
+ │ Qwen3Guard-Gen + Nemotron-CSR      │
+ └────────────────────────────────────┘
+ ┌────────────────────────────────────┐
+ │ mode=deep                          │
+ │ standard + Nemotron 3 Ultra triage │
+ └────────────────────────────────────┘
         ▼
    [aggregator: weighted verdict + per-model reasoning + audit trail]
         │
@@ -54,8 +57,9 @@ the policy rule that fired (if any).
 | Nemotron-CSR 4B (reasoning on) | ~200ms | per-message | custom policies ("no financial advice"), topic-following, jailbreak attempts |
 | Nemotron 3 Ultra triage | ~300ms | per-batch | explains disagreements between the two guard models |
 
-You pay the highest tier only when the lower tiers disagree or the policy demands
-deep reasoning.
+The production API exposes `fast`, `standard`, and `deep` modes so callers can
+choose when to pay for the heavier reasoning path. The demo records `deep` mode
+explicitly to show the optional triage explanation.
 
 ## Quickstart
 
