@@ -118,11 +118,11 @@ class LyceumProvider(StubProvider):
 
 
 __all__ = [
-    "HetznerProvider",
     "DigitalOceanProvider",
+    "GPUhubProvider",
+    "HetznerProvider",
     "LambdaProvider",
+    "LyceumProvider",
     "RunPodProvider",
     "SaladProvider",
-    "GPUhubProvider",
-    "LyceumProvider",
 ]

@@ -8,14 +8,12 @@ Use:
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 
 import typer
 
 from nemoguardian.cascade import Cascade, CascadeConfig
 from nemoguardian.policy.presets import get_preset
-from nemoguardian.schemas import ModerateRequest, Mode
+from nemoguardian.schemas import Mode, ModerateRequest
 
 app = typer.Typer(help="Multi-model LLM moderation cascade.")
 
@@ -54,7 +52,7 @@ def demo(
     preset: str = typer.Option("discord", help="Policy preset"),
 ) -> None:
     """Run the cascade on a single text and print the verdict."""
-    cascade = Cascade(CascadeConfig())
+    cascade = Cascade(CascadeConfig.from_env())
     request = ModerateRequest(text=text, policy=policy, mode=mode)
     policy_engine = get_preset(preset)
     result = cascade.moderate(request, policy_engine=policy_engine)

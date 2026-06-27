@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from nemoguardian.billing import db
-from nemoguardian.billing.plans import Tier, get_plan
+from nemoguardian.billing.plans import Tier
 
 
 def report_usage(customer_id: int, *, call_type: str, units: int = 1, request_id: str | None = None) -> None:
@@ -87,4 +87,4 @@ def check_allowance(customer_id: int) -> tuple[bool, dict[str, Any]]:
     }
 
 
-__all__ = ["report_usage", "check_allowance"]
+__all__ = ["check_allowance", "report_usage"]

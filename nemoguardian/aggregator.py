@@ -4,10 +4,9 @@ Combines per-model verdicts into a single final verdict + reasons list + score.
 
 Rules (default weights):
 - Qwen3Guard-Gen: 0.40
+- Qwen3Guard-Stream: 0.40 (fast mode document summary)
 - Nemotron-CSR:   0.40
 - Nemotron triage: 0.20 (only in DEEP mode, only when present)
-- Qwen3Guard-Stream (token-level): not aggregated here — it's surfaced as
-  per-token verdicts in the streaming endpoint.
 
 Aggregation: weighted mean of scores → threshold → label.
 - score < 0.30 → safe
@@ -53,6 +52,7 @@ def aggregate(
 
     ``verdicts`` keys must be one of:
     - "qwen3_guard_gen" → Qwen3Guard-Gen (full doc)
+    - "qwen3_guard_stream" → Qwen3Guard-Stream (fast mode)
     - "nemotron_csr"    → Nemotron Content Safety Reasoning
     - "triage"          → Nemotron 3 Ultra triage (deep mode)
     """
@@ -65,8 +65,9 @@ def aggregate(
 
     mapping: dict[str, tuple[float, str]] = {
         "qwen3_guard_gen": (cfg.qwen_weight, "Qwen3Guard"),
-        "nemotron_csr":    (cfg.csr_weight, "Nemotron-CSR"),
-        "triage":          (cfg.triage_weight, "Triage"),
+        "qwen3_guard_stream": (cfg.qwen_weight, "Qwen3Guard-Stream"),
+        "nemotron_csr": (cfg.csr_weight, "Nemotron-CSR"),
+        "triage": (cfg.triage_weight, "Triage"),
     }
 
     # Hard override: any model with verdict=unsafe AND score ≥ override_on_unsafe
@@ -98,7 +99,7 @@ def aggregate(
     # Determine verdict (strict boundaries so a perfectly mid score stays CONTROVERSIAL)
     if override_to_unsafe:
         verdict = VerdictLabel.UNSAFE
-        score = max(weighted_score, 0.7)
+        weighted_score = max(weighted_score, 0.7)
     elif weighted_score > cfg.unsafe_threshold:
         verdict = VerdictLabel.UNSAFE
     elif weighted_score > cfg.safe_threshold:
@@ -122,4 +123,4 @@ def aggregate(
     )
 
 
-__all__ = ["AggregatorConfig", "AggregatedVerdict", "aggregate"]
+__all__ = ["AggregatedVerdict", "AggregatorConfig", "aggregate"]

@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Protocol, runtime_checkable
 
-
 # --- Provider IDs (canonical names) --------------------------------------
 
 class ProviderName(str, Enum):
@@ -117,7 +116,7 @@ class Offer:
     instance_type: str = ""           # provider-specific machine type
     bandwidth_gbps: float | None = None
     ephemeral_storage_gb: int | None = None
-    reliability_score: float = 1.0    # 0.0–1.0 (heuristic)
+    reliability_score: float = 1.0    # 0.0-1.0 (heuristic)
     notes: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -294,20 +293,20 @@ class Registry:
 
 
 __all__ = [
-    "ProviderName",
-    "ProviderCatalogEntry",
+    "CASCADE_VRAM_COMFORT_GB",
+    "CASCADE_VRAM_FLOOR_GB",
+    "CASCADE_VRAM_HEADROOM_GB",
     "CATALOG",
-    "Offer",
+    "GPUProvider",
     "Instance",
     "InstanceState",
     "InstanceStatus",
+    "Offer",
+    "ProviderCatalogEntry",
+    "ProviderName",
     "ProvisionError",
-    "GPUProvider",
-    "StubProvider",
     "Registry",
-    "CASCADE_VRAM_FLOOR_GB",
-    "CASCADE_VRAM_COMFORT_GB",
-    "CASCADE_VRAM_HEADROOM_GB",
+    "StubProvider",
     "estimate_cascade_vram_gb",
     "offers_fitting_cascade",
 ]

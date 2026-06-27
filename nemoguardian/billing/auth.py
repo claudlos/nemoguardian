@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Header, HTTPException, status
 
 from nemoguardian.billing import db
 from nemoguardian.billing.plans import Plan, Tier, get_plan
@@ -68,7 +68,7 @@ def enforce_feature(auth: AuthContext, feature: str) -> None:
 
 def _upgrade_target(feature: str) -> Tier:
     """Cheapest tier that includes the feature."""
-    from nemoguardian.billing.plans import PLANS, Tier  # noqa: F401
+    from nemoguardian.billing.plans import PLANS, Tier
 
     # Order matters — start from cheapest.
     for tier in (Tier.FREE, Tier.PRO, Tier.SCALE, Tier.SELF_HOSTED):
@@ -77,4 +77,4 @@ def _upgrade_target(feature: str) -> Tier:
     return Tier.SCALE  # fallback
 
 
-__all__ = ["AuthContext", "require_api_key", "enforce_feature"]
+__all__ = ["AuthContext", "enforce_feature", "require_api_key"]

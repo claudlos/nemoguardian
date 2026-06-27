@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nemoguardian.aggregator import AggregatorConfig, aggregate
+from nemoguardian.aggregator import aggregate
 from nemoguardian.schemas import ModelVerdict, VerdictLabel
 
 

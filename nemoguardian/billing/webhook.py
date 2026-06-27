@@ -18,14 +18,14 @@ import hashlib
 import hmac
 import json
 import os
+from contextlib import suppress
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException, Request, status
 
 from nemoguardian.billing import db
-from nemoguardian.billing.plans import Tier, get_plan
-
+from nemoguardian.billing.plans import Tier
 
 WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 
@@ -89,10 +89,7 @@ async def handle_stripe_webhook(request: Request) -> dict[str, Any]:
     data = event.get("data", {}).get("object", {})
 
     handler = _HANDLERS.get(event_type)
-    if handler is not None:
-        result = handler(data)
-    else:
-        result = {"ignored": True, "type": event_type}
+    result = handler(data) if handler is not None else {"ignored": True, "type": event_type}
 
     return {"received": True, "type": event_type, **result}
 
@@ -109,10 +106,8 @@ def _on_checkout_completed(session: dict[str, Any]) -> dict[str, Any]:
 
     customer = None
     if customer_id_meta:
-        try:
+        with suppress(KeyError, ValueError):
             customer = db.get_customer(int(customer_id_meta))
-        except (KeyError, ValueError):
-            pass
     if customer is None and stripe_customer_id:
         customer = db.get_customer_by_stripe_id(stripe_customer_id)
     if customer is None and customer_email:
@@ -198,8 +193,8 @@ _HANDLERS = {
 
 
 __all__ = [
-    "handle_stripe_webhook",
-    "verify_signature",
     "WEBHOOK_SECRET",
     "get_webhook_secret",
+    "handle_stripe_webhook",
+    "verify_signature",
 ]  # type: ignore[list-item]  # actually exporting get_webhook_secret

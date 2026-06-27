@@ -19,7 +19,7 @@ from nemoguardian.schemas import Mode, ModerateRequest, VerdictLabel
 
 
 def make_moderator():
-    cascade = Cascade(CascadeConfig())
+    cascade = Cascade(CascadeConfig.from_env())
     policy = get_preset("twitch")
 
     async def moderate(text: str) -> None:
@@ -41,7 +41,6 @@ def run_bot(channel: str) -> None:
     if not token:
         raise RuntimeError("TWITCH_TOKEN env var required")
 
-    import twitchio
     from twitchio.ext import commands
 
     bot = commands.Bot(token=token, prefix="!", initial_channels=[channel])

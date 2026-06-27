@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
-from typing import Annotated
+import os
+from pathlib import Path
+from typing import Annotated, ClassVar
 
 import structlog
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from nemoguardian.billing import auth as billing_auth
 from nemoguardian.billing import checkout as billing_checkout
@@ -27,24 +29,25 @@ from nemoguardian.billing.schemas import (
     ProvisioningResponse,
     UsageResponse,
 )
-from nemoguardian.providers import (
-    ProviderName,
-    list_providers as providers_list,
-    offers_fitting_cascade,
-    provision_cheapest_fit,
-)
-from nemoguardian.providers.base import CASCADE_VRAM_COMFORT_GB, ProvisionError
-from nemoguardian.providers.registry import default_registry as providers_registry
 from nemoguardian.cascade import Cascade, CascadeConfig
 from nemoguardian.policy.nemoclaw import NemoclawPolicy
 from nemoguardian.policy.presets import PRESETS, get_preset
+from nemoguardian.providers import (
+    ProviderName,
+    offers_fitting_cascade,
+    provision_cheapest_fit,
+)
+from nemoguardian.providers import (
+    list_providers as providers_list,
+)
+from nemoguardian.providers.base import CASCADE_VRAM_COMFORT_GB, ProvisionError
+from nemoguardian.providers.registry import default_registry as providers_registry
 from nemoguardian.schemas import (
     HealthResponse,
     ModerateRequest,
     ModerateResponse,
     StreamChunk,
 )
-
 
 logger = structlog.get_logger("nemoguardian.server")
 
@@ -53,12 +56,12 @@ logger = structlog.get_logger("nemoguardian.server")
 
 class _State:
     cascade: Cascade | None = None
-    policies: dict[str, NemoclawPolicy] = {}
+    policies: ClassVar[dict[str, NemoclawPolicy]] = {}
 
     @classmethod
     def ensure(cls) -> tuple[Cascade, dict[str, NemoclawPolicy]]:
         if cls.cascade is None:
-            cls.cascade = Cascade(CascadeConfig())
+            cls.cascade = Cascade(CascadeConfig.from_env())
         if not cls.policies:
             for name in PRESETS:
                 cls.policies[name] = get_preset(name)
@@ -102,11 +105,17 @@ async def health() -> HealthResponse:
     except Exception:
         gpu_available = False
         gpu_name = None
+    triage_status = cascade.triage_status()
     return HealthResponse(
         status="ok",
         models_loaded=cascade.loaded_models(),
         gpu_available=gpu_available,
         gpu_name=gpu_name,
+        runtime_device=f"cuda: {gpu_name}" if gpu_available and gpu_name else "cpu",
+        runtime_model_config=cascade.model_config_summary(),
+        triage_configured=bool(triage_status["configured"]),
+        triage_provider=triage_status["provider"] if isinstance(triage_status["provider"], str) else None,
+        triage_status=triage_status,
     )
 
 
@@ -135,17 +144,15 @@ async def moderate(
     cascade = get_cascade()
     policies = get_policies()
 
-    policy_engine: NemoclawPolicy | None = None
-    if policy_preset:
-        if policy_preset not in policies:
-            raise HTTPException(400, f"unknown preset {policy_preset!r}; available: {list(policies)}")
-        policy_engine = policies[policy_preset]
-    elif policy_yaml:
-        policy_engine = NemoclawPolicy.from_dict(_yaml_safe_load(policy_yaml))
+    policy_engine = _resolve_policy_engine(
+        policies,
+        policy_preset=policy_preset,
+        policy_yaml=policy_yaml,
+    )
 
     try:
         result = await asyncio.to_thread(cascade.moderate, request, policy_engine=policy_engine)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception("moderation_failed", error=str(exc))
         raise HTTPException(500, f"moderation failed: {exc}") from exc
 
@@ -156,6 +163,30 @@ async def moderate(
     )
     result.usage_info = usage  # type: ignore[attr-defined]
     return result
+
+
+@app.post("/demo/moderate", response_model=ModerateResponse)
+async def demo_moderate(
+    request: ModerateRequest,
+    policy_preset: Annotated[str | None, Query(description="Built-in policy preset")] = "discord",
+    policy_yaml: Annotated[str | None, Query(description="Inline YAML policy")] = None,
+) -> ModerateResponse:
+    """Hackathon demo endpoint: real cascade, no billing/auth wrapper."""
+    if not _demo_endpoint_enabled():
+        raise HTTPException(404, "demo endpoint disabled")
+
+    cascade = get_cascade()
+    policy_engine = _resolve_policy_engine(
+        get_policies(),
+        policy_preset=policy_preset,
+        policy_yaml=policy_yaml,
+    )
+
+    try:
+        return await asyncio.to_thread(cascade.moderate, request, policy_engine=policy_engine)
+    except Exception as exc:
+        logger.exception("demo_moderation_failed", error=str(exc))
+        raise HTTPException(500, f"demo moderation failed: {exc}") from exc
 
 
 @app.post("/v1/moderate/stream")
@@ -190,7 +221,7 @@ async def moderate_stream(request: ModerateRequest) -> StreamingResponse:
                 latency_ms=elapsed_ms,
             )
             yield terminal.model_dump_json() + "\n"
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.exception("stream_failed", error=str(exc))
             yield StreamChunk(
                 token_index=0,
@@ -208,6 +239,30 @@ def _yaml_safe_load(s: str) -> dict:
     import yaml
 
     return yaml.safe_load(s) or {}
+
+
+def _resolve_policy_engine(
+    policies: dict[str, NemoclawPolicy],
+    *,
+    policy_preset: str | None,
+    policy_yaml: str | None,
+) -> NemoclawPolicy | None:
+    if policy_preset:
+        if policy_preset not in policies:
+            raise HTTPException(400, f"unknown preset {policy_preset!r}; available: {list(policies)}")
+        return policies[policy_preset]
+    if policy_yaml:
+        return NemoclawPolicy.from_dict(_yaml_safe_load(policy_yaml))
+    return None
+
+
+def _demo_endpoint_enabled() -> bool:
+    return os.environ.get("NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
 
 
 __all__ = ["app"]
@@ -460,8 +515,8 @@ async def billing_provision_specific(
         )
     try:
         provider_enum = ProviderName(provider_name)
-    except ValueError:
-        raise HTTPException(400, f"unknown provider: {provider_name!r}")
+    except ValueError as exc:
+        raise HTTPException(400, f"unknown provider: {provider_name!r}") from exc
     provider = providers_registry().get(provider_enum)
 
     offers = await provider.list_offers(
@@ -507,13 +562,10 @@ async def billing_provision_specific(
 
 # --- Demo UI --------------------------------------------------------------
 
-from fastapi.responses import FileResponse as _FileResponse
-from pathlib import Path as _Path
-
-_DEMO_DIR = _Path(__file__).resolve().parent.parent / "demo"
+_DEMO_DIR = Path(__file__).resolve().parent.parent / "demo"
 
 
-@app.get("/demo", response_class=_FileResponse)
-async def demo_ui() -> _FileResponse:
+@app.get("/demo", response_class=FileResponse)
+async def demo_ui() -> FileResponse:
     """Serve the static cost-comparison demo page."""
-    return _FileResponse(str(_DEMO_DIR / "index.html"))
+    return FileResponse(str(_DEMO_DIR / "index.html"))

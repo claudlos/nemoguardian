@@ -94,7 +94,7 @@ async def provision_cheapest_fit(
     if not fits:
         from nemoguardian.providers.base import ProvisionError
         raise ProvisionError(
-            f"no offers fit the cascade (need >=24GB VRAM)"
+            "no offers fit the cascade (need >=24GB VRAM)"
             + (f" under ${max_price_usd}/hr" if max_price_usd else "")
         )
     cheapest = sorted(fits, key=lambda o: o.price_per_hour_usd)[0]
@@ -106,7 +106,7 @@ async def provision_cheapest_fit(
 
 __all__ = [
     "default_registry",
-    "list_providers",
     "get_provider",
+    "list_providers",
     "provision_cheapest_fit",
 ]

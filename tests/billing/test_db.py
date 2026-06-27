@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import tempfile
-from pathlib import Path
-
 import pytest
 
 from nemoguardian.billing import db
@@ -57,7 +53,6 @@ def test_create_and_revoke_api_key():
 
 def test_max_api_keys_enforced():
     a = db.upsert_customer(email="a@example.com")
-    plan = a.plan
     # FREE = 1 key
     db.create_api_key(a.id)
     with pytest.raises(ValueError, match="max API keys"):
@@ -72,7 +67,7 @@ def test_record_and_summarize_usage():
     # Period = current month; use the metered helper for the canonical window
     from nemoguardian.billing.metered import check_allowance
 
-    allowed, info = check_allowance(a.id)
+    _allowed, info = check_allowance(a.id)
     assert info["total_calls"] == 3
     assert info["allowance"] == 1_000  # free tier
     assert info["overage_calls"] == 0

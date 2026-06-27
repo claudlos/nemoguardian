@@ -25,19 +25,26 @@ RUN python -m venv /opt/venv \
         "uvicorn[standard]>=0.27" \
         "pydantic>=2.6" \
         "httpx>=0.27" \
+        "openai>=1.0" \
         "pyyaml>=6.0" \
+        "stripe>=8.0" \
         "transformers>=4.51.0" \
         "torch>=2.2" \
         "accelerate>=0.27" \
         "bitsandbytes>=0.43" \
         "tenacity>=8.2" \
         "structlog>=24.1" \
-        "typer>=0.12"
+        "typer>=0.12" \
+        "numpy>=1.26"
 
 ENV PATH="/opt/venv/bin:${PATH}"
 
 # Application code
 COPY nemoguardian ./nemoguardian
+COPY demo ./demo
+COPY docs ./docs
+COPY scripts ./scripts
+COPY README.md SUBMISSION.md ./
 
 # Pre-download default models at build time so first boot is fast.
 # Override with NEMOGUARDIAN_SKIP_PREDOWNLOAD=1 for slim builds.
@@ -58,6 +65,11 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
 ENV NEMOGUARDIAN_API_KEY=${NEMOGUARDIAN_API_KEY:-nmg_default_change_me} \
     NEMOGUARDIAN_TIER=${NEMOGUARDIAN_TIER:-self_hosted} \
     NEMOGUARDIAN_CASCADE_MODE=${NEMOGUARDIAN_CASCADE_MODE:-standard} \
-    NEMOGUARDIAN_QUANTIZE=${NEMOGUARDIAN_QUANTIZE:-1}
+    NEMOGUARDIAN_QUANTIZE=${NEMOGUARDIAN_QUANTIZE:-1} \
+    NEMOGUARDIAN_QWEN_MODEL=${NEMOGUARDIAN_QWEN_MODEL:-Qwen/Qwen3Guard-Gen-4B} \
+    NEMOGUARDIAN_QWEN_STREAM_MODEL=${NEMOGUARDIAN_QWEN_STREAM_MODEL:-Qwen/Qwen3Guard-Stream-0.6B} \
+    NEMOGUARDIAN_CSR_MODEL=${NEMOGUARDIAN_CSR_MODEL:-nvidia/Nemotron-Content-Safety-Reasoning-4B} \
+    NEMOGUARDIAN_TRIAGE_MODEL=${NEMOGUARDIAN_TRIAGE_MODEL:-nvidia/nemotron-3-ultra-220b-a12b} \
+    NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT=${NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT:-1}
 
 CMD ["uvicorn", "nemoguardian.server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

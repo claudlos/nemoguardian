@@ -17,17 +17,16 @@ from __future__ import annotations
 import asyncio
 import os
 import secrets
-import time
 from typing import Literal
 
 from nemoguardian.billing import db
 from nemoguardian.billing.plans import Tier
 
-
 Provider = Literal["vastai", "digitalocean", "lambda", "on_prem"]
 
 
 SUPPORTED_PROVIDERS: list[Provider] = ["vastai", "digitalocean", "lambda", "on_prem"]
+_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 
 
 async def provision_instance(
@@ -44,7 +43,9 @@ async def provision_instance(
     if provider not in SUPPORTED_PROVIDERS:
         raise ValueError(f"unsupported provider {provider!r}")
     job = db.create_provisioning_job(customer_id=customer_id, tier=Tier.SELF_HOSTED, provider=provider)
-    asyncio.create_task(_run_job(job.id, provider, ssh_public_key))
+    task = asyncio.create_task(_run_job(job.id, provider, ssh_public_key))
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
     return job
 
 
@@ -78,7 +79,7 @@ async def _run_job(job_id: int, provider: Provider, ssh_public_key: str | None) 
             endpoint_url=endpoint_url,
             ssh_command=ssh_command,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         db.update_provisioning_job(job_id, status="failed", error_message=str(exc))
 
 
@@ -97,4 +98,4 @@ def _render_onprem_snippet(ssh_public_key: str | None) -> str:
     )
 
 
-__all__ = ["provision_instance", "Provider", "SUPPORTED_PROVIDERS"]
+__all__ = ["SUPPORTED_PROVIDERS", "Provider", "provision_instance"]

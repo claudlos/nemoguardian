@@ -11,14 +11,13 @@ import os
 import secrets
 import sqlite3
 import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator
 
 from nemoguardian.billing.plans import Tier, get_plan
-
 
 DEFAULT_DB_PATH = Path(
     os.environ.get("NEMOGUARDIAN_DB_PATH", "/tmp/nemoguardian.db")
@@ -451,18 +450,24 @@ def update_provisioning_job(
     conn = init_db()
     fields, values = [], []
     if status is not None:
-        fields.append("status = ?"); values.append(status)
+        fields.append("status = ?")
+        values.append(status)
     if instance_id is not None:
-        fields.append("instance_id = ?"); values.append(instance_id)
+        fields.append("instance_id = ?")
+        values.append(instance_id)
     if endpoint_url is not None:
-        fields.append("endpoint_url = ?"); values.append(endpoint_url)
+        fields.append("endpoint_url = ?")
+        values.append(endpoint_url)
     if ssh_command is not None:
-        fields.append("ssh_command = ?"); values.append(ssh_command)
+        fields.append("ssh_command = ?")
+        values.append(ssh_command)
     if error_message is not None:
-        fields.append("error_message = ?"); values.append(error_message)
+        fields.append("error_message = ?")
+        values.append(error_message)
     if not fields:
         return
-    fields.append("updated_at = ?"); values.append(_now())
+    fields.append("updated_at = ?")
+    values.append(_now())
     values.append(job_id)
     conn.execute(f"UPDATE provisioning_jobs SET {', '.join(fields)} WHERE id = ?", values)
 
@@ -477,27 +482,27 @@ def list_provisioning_jobs(customer_id: int) -> list[ProvisioningJob]:
 
 
 __all__ = [
-    "init_db",
-    "Customer",
     "ApiKey",
-    "Subscription",
+    "Customer",
     "ProvisioningJob",
+    "Subscription",
     "UsageSummary",
-    "upsert_customer",
+    "create_api_key",
+    "create_provisioning_job",
     "get_customer",
     "get_customer_by_email",
     "get_customer_by_stripe_id",
-    "set_customer_tier",
-    "create_api_key",
-    "lookup_customer_by_api_key",
-    "revoke_api_key",
-    "list_api_keys",
-    "record_usage",
-    "usage_for_period",
-    "upsert_subscription",
-    "get_subscription",
-    "create_provisioning_job",
     "get_provisioning_job",
-    "update_provisioning_job",
+    "get_subscription",
+    "init_db",
+    "list_api_keys",
     "list_provisioning_jobs",
+    "lookup_customer_by_api_key",
+    "record_usage",
+    "revoke_api_key",
+    "set_customer_tier",
+    "update_provisioning_job",
+    "upsert_customer",
+    "upsert_subscription",
+    "usage_for_period",
 ]

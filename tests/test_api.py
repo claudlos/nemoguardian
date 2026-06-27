@@ -13,9 +13,8 @@ from fastapi.testclient import TestClient
 
 from nemoguardian import server as srv
 from nemoguardian.cascade import Cascade
-from nemoguardian.policy.nemoclaw import NemoclawPolicy
 from nemoguardian.policy.presets import get_preset
-from nemoguardian.schemas import ModerateResponse, ModelVerdict, VerdictLabel
+from nemoguardian.schemas import ModelVerdict, ModerateResponse, VerdictLabel
 
 
 def _mock_moderate(request, policy_engine=None, **kw) -> ModerateResponse:
@@ -75,6 +74,17 @@ def client(monkeypatch, tmp_path):
         "qwen3_guard_stream": False,
         "nemotron_csr": False,
     }
+    fake_cascade.model_config_summary.return_value = {
+        "qwen_gen_model": "mock-qwen",
+        "nemotron_csr_model": "mock-csr",
+        "enable_triage": True,
+    }
+    fake_cascade.triage_status.return_value = {
+        "configured": True,
+        "provider": "nvidia",
+        "model": "mock-triage",
+        "base_url": "https://example.test/v1",
+    }
     policies = {name: get_preset(name) for name in ("discord", "twitch", "generic")}
 
     # Use a temp DB + provision a free-tier API key the tests can authenticate with.
@@ -108,6 +118,10 @@ def test_health(client):
     assert r.status_code == 200
     body = r.json()
     assert body["status"] in {"ok", "degraded"}
+    assert body["model_config"]["qwen_gen_model"] == "mock-qwen"
+    assert body["triage_configured"] is True
+    assert body["triage_provider"] == "nvidia"
+    assert "runtime_device" in body
 
 
 def test_moderate_blocked(client):
@@ -135,3 +149,29 @@ def test_moderate_with_preset_matches_rule(client):
 def test_moderate_unknown_preset(client):
     r = client.post("/v1/moderate", json={"text": "x"}, params={"policy_preset": "nope"})
     assert r.status_code == 400
+
+
+def test_demo_moderate_does_not_require_api_key(client):
+    client.headers.pop("Authorization", None)
+    r = client.post(
+        "/demo/moderate",
+        json={"text": "drop your SSN", "policy": "block PII"},
+        params={"policy_preset": "discord"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["verdict"] == "unsafe"
+    assert body["matched_policy_rule"] == "force-block-pii"
+
+
+def test_demo_moderate_can_be_disabled(client, monkeypatch):
+    monkeypatch.setenv("NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT", "0")
+    client.headers.pop("Authorization", None)
+    r = client.post("/demo/moderate", json={"text": "hello"})
+    assert r.status_code == 404
+
+
+def test_demo_ui_served(client):
+    r = client.get("/demo")
+    assert r.status_code == 200
+    assert "Moderation Console" in r.text

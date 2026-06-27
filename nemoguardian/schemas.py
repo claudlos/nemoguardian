@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Literal
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Mode(str, Enum):
@@ -64,10 +64,20 @@ class ModerateResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     status: Literal["ok", "degraded"] = "ok"
     models_loaded: dict[str, bool] = Field(default_factory=dict)
     gpu_available: bool = False
     gpu_name: str | None = None
+    runtime_device: str = "cpu"
+    runtime_model_config: dict[str, str | bool | None] = Field(
+        default_factory=dict,
+        alias="model_config",
+    )
+    triage_configured: bool = False
+    triage_provider: str | None = None
+    triage_status: dict[str, str | bool | None] = Field(default_factory=dict)
 
 
 class StreamChunk(BaseModel):
@@ -82,11 +92,11 @@ class StreamChunk(BaseModel):
 
 
 __all__ = [
+    "HealthResponse",
     "Mode",
-    "VerdictLabel",
     "ModelVerdict",
     "ModerateRequest",
     "ModerateResponse",
-    "HealthResponse",
     "StreamChunk",
+    "VerdictLabel",
 ]

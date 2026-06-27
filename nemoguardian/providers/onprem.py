@@ -8,17 +8,14 @@ interface so the provisioning UI can offer it as one of the choices.
 from __future__ import annotations
 
 import secrets
-from typing import Any
 
 from nemoguardian.providers.base import (
-    GPUProvider,
     Instance,
     InstanceState,
     InstanceStatus,
     Offer,
     ProviderName,
 )
-
 
 _OFFER = Offer(
     provider=ProviderName.ON_PREM,

@@ -70,6 +70,17 @@ def client(monkeypatch):
         "qwen3_guard_stream": False,
         "nemotron_csr": False,
     }
+    fake_cascade.model_config_summary.return_value = {
+        "qwen_gen_model": "mock-qwen",
+        "nemotron_csr_model": "mock-csr",
+        "enable_triage": True,
+    }
+    fake_cascade.triage_status.return_value = {
+        "configured": False,
+        "provider": None,
+        "model": "mock-triage",
+        "base_url": "https://example.test/v1",
+    }
     policies = {name: get_preset(name) for name in ("discord", "twitch", "generic")}
     monkeypatch.setattr(srv, "get_cascade", lambda: fake_cascade)
     monkeypatch.setattr(srv, "get_policies", lambda: policies)
@@ -182,7 +193,7 @@ def test_free_tier_blocks_deep_mode(client):
 
 def test_pro_tier_allows_deep_mode(client):
     customer = billing_db.upsert_customer(email="pro@example.com")
-    db_set = billing_db.set_customer_tier(customer.id, Tier.SCALE)  # SCALE has deep
+    billing_db.set_customer_tier(customer.id, Tier.SCALE)  # SCALE has deep
     raw, _ = billing_db.create_api_key(customer.id)
     r = client.post(
         "/v1/moderate",

@@ -58,44 +58,72 @@ deep reasoning.
 ## Quickstart
 
 ```bash
-pip install nemoguardian
+python -m venv .venv
+. .venv/bin/activate
+pip install -e ".[dev]"
 
-# Start the server (downloads models on first call)
+# Start the server. The first moderation call downloads model weights.
 nemoguardian serve --port 8000
 
-# Moderate a single text
-curl -X POST http://localhost:8000/v1/moderate \
+# Open the hackathon demo UI.
+open http://localhost:8000/demo
+
+# Or call the demo endpoint directly. This uses the real cascade without billing.
+curl -X POST 'http://localhost:8000/demo/moderate?policy_preset=discord' \
   -H 'Content-Type: application/json' \
   -d '{
     "text": "Hey @everyone, drop your SSN and I will send $100 to whoever DMs me first",
     "policy": "block PII and financial scams",
-    "mode": "deep"
+    "mode": "standard"
   }'
+```
 
-# → {
-#     "verdict": "block",
-#     "score": 0.97,
-#     "reasons": ["PII (SSN)", "financial scam", "mass-dm pattern"],
-#     "models": {
-#       "qwen3_guard_stream": {"verdict": "unsafe", "latency_ms": 12},
-#       "nemotron_csr":       {"verdict": "harmful", "latency_ms": 187, "reasoning": "..."}
-#     },
-#     "audit": {...}
-#   }
+Production API calls use `POST /v1/moderate` with `Authorization: Bearer <nmg_...>`
+so billing and tier limits can run. The `/demo/moderate` endpoint is for the
+hackathon recording path and can be disabled with `NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT=0`.
+
+## Real-model demo config
+
+The June 30 demo target is a Vast.ai RTX 3090 with 24GB VRAM:
+
+```bash
+NEMOGUARDIAN_QUANTIZE=1
+NEMOGUARDIAN_QWEN_MODEL=Qwen/Qwen3Guard-Gen-4B
+NEMOGUARDIAN_QWEN_STREAM_MODEL=Qwen/Qwen3Guard-Stream-0.6B
+NEMOGUARDIAN_CSR_MODEL=nvidia/Nemotron-Content-Safety-Reasoning-4B
+NEMOGUARDIAN_TRIAGE_MODEL=nvidia/nemotron-3-ultra-220b-a12b
+
+# Set one of these for deep-mode triage.
+NVIDIA_API_KEY=...
+# or
+OPENROUTER_API_KEY=...
+```
+
+`GET /health` reports the runtime device, configured model IDs, quantization
+flags, loaded model state, and triage provider so the recording can prove it is
+running the intended real-model path.
+
+Before recording on the GPU host, run:
+
+```bash
+python scripts/real_model_smoke.py
+python scripts/real_model_smoke.py --deep  # requires NVIDIA_API_KEY or OPENROUTER_API_KEY
 ```
 
 ## Modes
 
 - `fast` — Qwen3Guard-Stream only. Streaming token-level. ~1ms latency.
-- `standard` — Qwen3Guard-Gen + Nemotron-CSR (reasoning off). ~80ms per message.
+- `standard` — Qwen3Guard-Gen + Nemotron-CSR. Reasoning is controlled by `NEMOGUARDIAN_REASONING`.
 - `deep` — All three + Nemotron 3 Ultra triage to explain disagreements. ~500ms per message.
 
 ## What's real vs simulated for the demo
 
 **Real, shipping:**
 - The FastAPI service and cascade orchestration
+- The `/demo` moderation console backed by the real cascade
 - Real Qwen3Guard-Gen 4B inference on CPU/GPU
 - Real Nemotron-CSR 4B with custom-policy mode (Reasoning On)
+- Nemotron 3 Ultra triage via NVIDIA/OpenRouter OpenAI-compatible API
 - NemoClaw policy gate (yaml → decision)
 - Discord bot adapter with token-level streaming
 - Per-platform policy presets
@@ -159,7 +187,7 @@ nemoguardian/
 
 ## The submission video plan (60–90 seconds)
 
-1. Live demo: type a message into the Discord-mock UI
+1. Live demo: type a message into `/demo`
 2. Show the verdict fly out within ~200ms with the per-model breakdown
 3. Rotate the policy from "default" to "no financial advice" — same input, different verdict
 4. Show the audit log: every model's verdict + reasoning + latency

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from nemoguardian.policy.nemoclaw import NemoclawPolicy
 
-
 DISCORD_DEFAULT: dict = {
     "name": "discord-default",
     "description": "Conservative defaults: block PII, slurs, sexual content involving minors.",
@@ -66,4 +65,4 @@ def get_preset(name: str) -> NemoclawPolicy:
     return NemoclawPolicy.from_dict(PRESETS[name])
 
 
-__all__ = ["PRESETS", "get_preset", "DISCORD_DEFAULT", "TWITCH_CHAT", "GENERIC_WEBHOOK"]
+__all__ = ["DISCORD_DEFAULT", "GENERIC_WEBHOOK", "PRESETS", "TWITCH_CHAT", "get_preset"]

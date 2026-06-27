@@ -21,12 +21,11 @@ from nemoguardian.aggregator import aggregate
 from nemoguardian.cascade import Cascade, CascadeConfig
 from nemoguardian.policy.presets import get_preset
 from nemoguardian.schemas import (
+    Mode,
     ModelVerdict,
     ModerateRequest,
-    Mode,
     VerdictLabel,
 )
-
 
 CACHE_PATH = Path("/tmp/nemoguardian_demo_cache.jsonl")
 
@@ -76,13 +75,13 @@ def run() -> None:
     cascade: Cascade | None = None
     if "NEMOGUARDIAN_DEMO_MOCK" not in os.environ:
         try:
-            cascade = Cascade(CascadeConfig())
+            cascade = Cascade(CascadeConfig.from_env())
             print("[nemoguardian] loading models (first run downloads ~10GB)...")
             # Force eager load so the user sees status, not a hang on first text.
             cascade.qwen_gen.ensure_loaded()
             cascade.csr.ensure_loaded()
             print("[nemoguardian] models loaded.\n")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"[nemoguardian] could not load real models: {exc}")
             print("[nemoguardian] falling back to mock verdicts.")
             cascade = None
@@ -139,6 +138,7 @@ def run() -> None:
                 verdict=agg.verdict,
                 score=agg.score,
                 categories=agg.categories,
+                policy_text=active_policy,
             )
             verdict = decision.final_label or agg.verdict
             score = agg.score

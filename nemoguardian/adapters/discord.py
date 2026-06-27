@@ -19,7 +19,7 @@ from nemoguardian.schemas import Mode, ModerateRequest, VerdictLabel
 
 def make_handler(cascade: Cascade | None = None):
     """Build an async message handler that runs the cascade."""
-    cascade = cascade or Cascade(CascadeConfig())
+    cascade = cascade or Cascade(CascadeConfig.from_env())
     policy = get_preset("discord")
 
     async def on_message(message) -> None:

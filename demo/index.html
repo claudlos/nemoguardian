@@ -2,144 +2,547 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>nemoguardian — cost comparison</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>nemoguardian demo</title>
 <style>
   :root {
-    --bg: #0d1117; --card: #161b22; --border: #30363d;
-    --text: #c9d1d9; --text-bright: #f0f6fc; --accent: #58a6ff;
-    --green: #3fb950; --yellow: #d29922; --red: #f85149;
+    --bg: #10100f;
+    --panel: #181816;
+    --panel-2: #20201d;
+    --border: #37372f;
+    --text: #ecebe5;
+    --muted: #aaa79b;
+    --green: #4fb06d;
+    --amber: #d4a23c;
+    --red: #d95f56;
+    --cyan: #5ca6b8;
+    --ink: #0b0b0a;
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: var(--bg); color: var(--text); padding: 32px;
-    line-height: 1.5;
-  }
-  .container { max-width: 960px; margin: 0 auto; }
-  h1 {
-    font-size: 28px; background: linear-gradient(90deg, #58a6ff, #3fb950);
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    margin-bottom: 4px;
-  }
-  .subtitle { color: #8b949e; font-size: 14px; margin-bottom: 32px; }
 
-  .kpi-row {
-    display: grid; grid-template-columns: repeat(4, 1fr);
-    gap: 12px; margin-bottom: 32px;
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    letter-spacing: 0;
   }
-  .kpi {
-    background: var(--card); border: 1px solid var(--border);
-    border-radius: 8px; padding: 16px;
+
+  button, input, select, textarea { font: inherit; }
+
+  .shell {
+    width: min(1180px, calc(100vw - 32px));
+    margin: 0 auto;
+    padding: 24px 0 36px;
   }
-  .kpi .value { font-size: 22px; font-weight: 700; color: var(--text-bright); }
-  .kpi .label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 28px;
+    line-height: 1.05;
+    font-weight: 760;
+  }
+
+  .tagline {
+    margin-top: 5px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .status-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+
+  .pill {
+    min-height: 30px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 9px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--muted);
+    background: var(--panel);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--muted);
+  }
+
+  .dot.ok { background: var(--green); }
+  .dot.warn { background: var(--amber); }
+  .dot.bad { background: var(--red); }
+
+  .grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(360px, 0.85fr);
+    gap: 16px;
+    align-items: stretch;
+  }
 
   .panel {
-    background: var(--card); border: 1px solid var(--border);
-    border-radius: 10px; padding: 24px; margin-bottom: 24px;
-  }
-  .panel h2 { font-size: 18px; margin-bottom: 16px; color: var(--text-bright); }
-
-  .offer-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  .offer-table th, .offer-table td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); }
-  .offer-table th { color: #8b949e; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
-  .offer-table tr.recommended { background: rgba(63, 185, 80, 0.06); }
-  .offer-table tr.recommended td:first-child::before {
-    content: "★"; color: var(--green); margin-right: 6px;
-  }
-  .price { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text-bright); }
-  .price-monthly { color: #8b949e; font-size: 12px; }
-  .provider { color: var(--accent); font-weight: 500; }
-  .vram { font-variant-numeric: tabular-nums; }
-  .vram.low { color: var(--red); }
-  .vram.ok  { color: var(--yellow); }
-  .vram.good { color: var(--green); }
-
-  .cta-row {
-    margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);
-    color: #8b949e; font-size: 13px;
-  }
-  .cta-row code {
-    background: #0d1421; padding: 2px 6px; border-radius: 3px; color: var(--text-bright);
+    border: 1px solid var(--border);
+    background: var(--panel);
+    border-radius: 8px;
+    padding: 18px;
   }
 
-  .footer { text-align: center; color: #6e7681; font-size: 12px; margin-top: 40px; }
+  .panel h2 {
+    margin: 0 0 14px;
+    font-size: 16px;
+    line-height: 1.2;
+  }
+
+  .field {
+    display: grid;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+
+  label {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 650;
+    text-transform: uppercase;
+  }
+
+  textarea, input, select {
+    width: 100%;
+    color: var(--text);
+    background: #0d0d0c;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 11px;
+    outline: none;
+  }
+
+  textarea {
+    min-height: 132px;
+    resize: vertical;
+    line-height: 1.45;
+  }
+
+  textarea:focus, input:focus, select:focus {
+    border-color: var(--cyan);
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 14px;
+  }
+
+  .examples {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .ghost {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+  }
+
+  button {
+    min-height: 36px;
+    border: 0;
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: var(--ink);
+    background: var(--green);
+    font-weight: 720;
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: wait;
+    opacity: 0.7;
+  }
+
+  .verdict {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel-2);
+    margin-bottom: 12px;
+  }
+
+  .verdict .label {
+    font-size: 30px;
+    font-weight: 820;
+    text-transform: uppercase;
+  }
+
+  .score {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .safe { color: var(--green); }
+  .controversial { color: var(--amber); }
+  .unsafe { color: var(--red); }
+
+  .empty {
+    color: var(--muted);
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 18px;
+  }
+
+  .kv {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 8px 10px;
+    font-size: 13px;
+    margin-bottom: 12px;
+  }
+
+  .kv .k { color: var(--muted); }
+
+  .model-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  .model {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    background: #11110f;
+  }
+
+  .model-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+    font-size: 13px;
+  }
+
+  .reason {
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+
+  .lower {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+    margin-top: 16px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  th, td {
+    padding: 10px 9px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+
+  th {
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+  }
+
+  tr.recommended {
+    background: rgba(79, 176, 109, 0.08);
+  }
+
+  .price {
+    font-variant-numeric: tabular-nums;
+    font-weight: 760;
+  }
+
+  .right { text-align: right; }
+
+  @media (max-width: 860px) {
+    .grid, .row { grid-template-columns: 1fr; }
+    header { align-items: flex-start; flex-direction: column; }
+    .status-strip { justify-content: flex-start; }
+    .controls { align-items: stretch; flex-direction: column; }
+    button { width: 100%; }
+  }
 </style>
 </head>
 <body>
-<div class="container">
-  <h1>nemoguardian</h1>
-  <div class="subtitle">Provider-agnostic multi-model LLM moderation. Powered by Nemotron + Qwen3Guard.</div>
-
-  <div class="kpi-row">
-    <div class="kpi"><div class="value">$0.07/hr</div><div class="label">cheapest cascade</div></div>
-    <div class="kpi"><div class="value">9</div><div class="label">GPU clouds</div></div>
-    <div class="kpi"><div class="value">24GB</div><div class="label">min VRAM (FP16)</div></div>
-    <div class="kpi"><div class="value">66+</div><div class="label">providers surveyed</div></div>
-  </div>
-
-  <div class="panel">
-    <h2>Self-hosted GPU options <span style="font-size:13px;color:#8b949e;font-weight:400">— sorted by $/hr, only offers that fit the cascade</span></h2>
-    <table class="offer-table" id="offer-table">
-      <thead>
-        <tr>
-          <th>GPU</th>
-          <th>Provider</th>
-          <th>Region</th>
-          <th>VRAM</th>
-          <th>$/hr</th>
-          <th>$/mo</th>
-        </tr>
-      </thead>
-      <tbody><tr><td colspan="6" style="text-align:center;color:#8b949e;padding:24px">loading offers…</td></tr></tbody>
-    </table>
-    <div class="cta-row">
-      Endpoint: <code>GET /providers/offers</code> · Provision cheapest: <code>POST /billing/provision/cheapest</code>
+<main class="shell">
+  <header>
+    <div>
+      <h1>nemoguardian</h1>
+      <div class="tagline">Nemotron + Qwen3Guard moderation cascade on commodity GPUs</div>
     </div>
-  </div>
+    <div class="status-strip" id="status-strip">
+      <span class="pill"><span class="dot warn"></span>loading runtime</span>
+    </div>
+  </header>
 
-  <div class="panel">
-    <h2>Why this matters</h2>
-    <p style="margin-bottom:8px">The same nemoguardian Docker image runs on every option above. Customers pick the price/perf trade-off that fits them:</p>
-    <ul style="padding-left:20px;color:#c9d1d9">
-      <li><strong style="color:var(--green)">★ Cheapest:</strong> RTX 3090 at $0.07/hr on Vast.ai — full cascade fits at FP16.</li>
-      <li><strong>Best value:</strong> A100 40GB at $0.14/hr — mature vLLM, reliable for production.</li>
-      <li><strong>EU sovereign:</strong> Hetzner GEX131 at $1.92/hr — dedicated, GDPR.</li>
-      <li><strong>Flagship:</strong> H100 80GB at $0.19/hr — when you need 200 RPS from one node.</li>
-    </ul>
-  </div>
+  <section class="grid">
+    <form class="panel" id="moderation-form">
+      <h2>Moderation Console</h2>
+      <div class="field">
+        <label for="text">Text</label>
+        <textarea id="text">Hey @everyone, drop your SSN and I will send $100 to whoever DMs me first</textarea>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label for="mode">Mode</label>
+          <select id="mode">
+            <option value="standard" selected>standard</option>
+            <option value="deep">deep</option>
+            <option value="fast">fast</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="preset">Preset</label>
+          <select id="preset">
+            <option value="discord" selected>discord</option>
+            <option value="twitch">twitch</option>
+            <option value="generic">generic</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="policy">Policy</label>
+        <input id="policy" value="block PII and financial scams">
+      </div>
+      <div class="controls">
+        <div class="examples">
+          <button class="ghost" type="button" data-example="pii">PII scam</button>
+          <button class="ghost" type="button" data-example="finance">finance</button>
+          <button class="ghost" type="button" data-example="safe">safe</button>
+        </div>
+        <button type="submit" id="run">Run Cascade</button>
+      </div>
+    </form>
 
-  <div class="footer">nemoguardian · Hermes Agent Accelerated Business Hackathon · NVIDIA × Stripe × Nous Research</div>
-</div>
+    <section class="panel">
+      <h2>Verdict</h2>
+      <div id="result">
+        <div class="empty">Awaiting moderation result.</div>
+      </div>
+    </section>
+  </section>
+
+  <section class="lower">
+    <section class="panel">
+      <h2>GPU Offers</h2>
+      <table id="offer-table">
+        <thead>
+          <tr>
+            <th>GPU</th>
+            <th>Provider</th>
+            <th>Region</th>
+            <th class="right">VRAM</th>
+            <th class="right">$/hr</th>
+            <th class="right">$/mo</th>
+          </tr>
+        </thead>
+        <tbody><tr><td colspan="6">loading offers</td></tr></tbody>
+      </table>
+    </section>
+  </section>
+</main>
 
 <script>
-async function load() {
+const examples = {
+  pii: {
+    text: "Hey @everyone, drop your SSN and I will send $100 to whoever DMs me first",
+    policy: "block PII and financial scams",
+    mode: "standard",
+    preset: "discord"
+  },
+  finance: {
+    text: "Should I put all of my rent money into this stock before earnings?",
+    policy: "no financial advice in this community",
+    mode: "standard",
+    preset: "generic"
+  },
+  safe: {
+    text: "Can someone explain how to set up two-factor authentication?",
+    policy: "block PII and financial scams",
+    mode: "standard",
+    preset: "discord"
+  }
+};
+
+const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#039;"
+}[ch]));
+
+async function loadHealth() {
+  const strip = document.querySelector("#status-strip");
   try {
-    const r = await fetch('/providers/offers?only_fits=true');
-    const data = await r.json();
-    const tbody = document.querySelector('#offer-table tbody');
-    if (!data.offers || data.offers.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#8b949e">no offers</td></tr>';
-      return;
-    }
-    tbody.innerHTML = data.offers.map((o, i) => {
-      const vramCls = o.vram_gb >= 32 ? 'good' : o.vram_gb >= 24 ? 'ok' : 'low';
-      const rowCls = i === 0 ? 'recommended' : '';
-      return `<tr class="${rowCls}">
-        <td>${o.gpu_model}</td>
-        <td class="provider">${o.provider}</td>
-        <td>${o.region}</td>
-        <td class="vram ${vramCls}">${o.vram_gb} GB</td>
-        <td class="price">$${o.price_per_hour_usd.toFixed(2)}</td>
-        <td class="price-monthly">$${o.monthly_price_usd.toFixed(0)}</td>
-      </tr>`;
-    }).join('');
-  } catch (e) {
-    document.querySelector('#offer-table tbody').innerHTML =
-      `<tr><td colspan="6" style="color:var(--red)">${e.message}</td></tr>`;
+    const response = await fetch("/health");
+    const health = await response.json();
+    const cfg = health.model_config || {};
+    const triage = health.triage_status || {};
+    strip.innerHTML = [
+      pill(health.gpu_available ? "ok" : "warn", health.runtime_device || "cpu"),
+      pill("ok", shortModel(cfg.qwen_gen_model || "qwen")),
+      pill("ok", shortModel(cfg.nemotron_csr_model || "csr")),
+      pill(health.triage_configured ? "ok" : "warn", triage.provider || "triage off")
+    ].join("");
+  } catch (error) {
+    strip.innerHTML = pill("bad", error.message);
   }
 }
-load();
+
+function pill(state, text) {
+  return `<span class="pill"><span class="dot ${state}"></span>${escapeHtml(text)}</span>`;
+}
+
+function shortModel(model) {
+  const parts = String(model).split("/");
+  return parts[parts.length - 1] || model;
+}
+
+async function loadOffers() {
+  const tbody = document.querySelector("#offer-table tbody");
+  try {
+    const response = await fetch("/providers/offers?only_fits=true");
+    const data = await response.json();
+    if (!data.offers || data.offers.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6">no fitting offers</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.offers.map((offer, index) => `
+      <tr class="${index === 0 ? "recommended" : ""}">
+        <td>${escapeHtml(offer.gpu_model)}</td>
+        <td>${escapeHtml(offer.provider)}</td>
+        <td>${escapeHtml(offer.region)}</td>
+        <td class="right">${Number(offer.vram_gb).toFixed(0)} GB</td>
+        <td class="right price">$${Number(offer.price_per_hour_usd).toFixed(2)}</td>
+        <td class="right">$${Number(offer.monthly_price_usd).toFixed(0)}</td>
+      </tr>
+    `).join("");
+  } catch (error) {
+    tbody.innerHTML = `<tr><td colspan="6">${escapeHtml(error.message)}</td></tr>`;
+  }
+}
+
+function setExample(name) {
+  const example = examples[name];
+  document.querySelector("#text").value = example.text;
+  document.querySelector("#policy").value = example.policy;
+  document.querySelector("#mode").value = example.mode;
+  document.querySelector("#preset").value = example.preset;
+}
+
+async function runModeration(event) {
+  event.preventDefault();
+  const button = document.querySelector("#run");
+  const result = document.querySelector("#result");
+  const text = document.querySelector("#text").value.trim();
+  const policy = document.querySelector("#policy").value.trim();
+  const mode = document.querySelector("#mode").value;
+  const preset = document.querySelector("#preset").value;
+
+  button.disabled = true;
+  result.innerHTML = '<div class="empty">running cascade...</div>';
+
+  try {
+    const response = await fetch(`/demo/moderate?policy_preset=${encodeURIComponent(preset)}`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({text, policy: policy || null, mode})
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail));
+    }
+    renderResult(payload);
+    loadHealth();
+  } catch (error) {
+    result.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function renderResult(payload) {
+  const result = document.querySelector("#result");
+  const verdict = payload.verdict || "safe";
+  const models = Object.entries(payload.model_verdicts || {});
+  const categories = (payload.categories || []).join(", ") || "none";
+  const reasons = (payload.reasons || []).join(" | ") || "none";
+  result.innerHTML = `
+    <div class="verdict">
+      <div class="label ${escapeHtml(verdict)}">${escapeHtml(verdict)}</div>
+      <div class="score">${Number(payload.score || 0).toFixed(2)} / ${Number(payload.total_latency_ms || 0).toFixed(0)}ms</div>
+    </div>
+    <div class="kv">
+      <div class="k">categories</div><div>${escapeHtml(categories)}</div>
+      <div class="k">policy rule</div><div>${escapeHtml(payload.matched_policy_rule || "none")}</div>
+      <div class="k">mode</div><div>${escapeHtml(payload.mode)}</div>
+      <div class="k">reasons</div><div>${escapeHtml(reasons)}</div>
+    </div>
+    <div class="model-list">
+      ${models.map(([name, model]) => renderModel(name, model)).join("")}
+    </div>
+  `;
+}
+
+function renderModel(name, model) {
+  return `
+    <div class="model">
+      <div class="model-top">
+        <strong>${escapeHtml(name)}</strong>
+        <span class="${escapeHtml(model.verdict)}">${escapeHtml(model.verdict)} ${Number(model.score || 0).toFixed(2)} / ${Number(model.latency_ms || 0).toFixed(0)}ms</span>
+      </div>
+      <div class="reason">${escapeHtml(model.reasoning || model.error || model.model_id || "")}</div>
+    </div>
+  `;
+}
+
+document.querySelector("#moderation-form").addEventListener("submit", runModeration);
+document.querySelectorAll("[data-example]").forEach((button) => {
+  button.addEventListener("click", () => setExample(button.dataset.example));
+});
+
+loadHealth();
+loadOffers();
 </script>
 </body>
 </html>

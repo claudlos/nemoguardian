@@ -8,7 +8,6 @@ import pytest
 
 from nemoguardian.providers import (
     ProviderName,
-    Registry,
     default_registry,
     get_provider,
     list_providers,
@@ -16,7 +15,6 @@ from nemoguardian.providers import (
 )
 from nemoguardian.providers.base import (
     CASCADE_VRAM_COMFORT_GB,
-    CATALOG,
     InstanceState,
     Offer,
     ProvisionError,
@@ -33,7 +31,6 @@ from nemoguardian.providers.stubs import (
     SaladProvider,
 )
 from nemoguardian.providers.vastai import VastAIProvider
-
 
 # ---------- Catalog / helpers ----------
 
@@ -175,9 +172,8 @@ def test_all_offers_have_required_fields():
 @pytest.mark.asyncio
 async def test_provision_cheapest_fit_picks_rtx_3090(monkeypatch):
     monkeypatch.delenv("VASTAI_API_KEY", raising=False)
-    from nemoguardian.providers.registry import provision_cheapest_fit
-
     import nemoguardian.providers.registry as reg_module
+    from nemoguardian.providers.registry import provision_cheapest_fit
     reg_module._REGISTRY = None
     offer, instance = await provision_cheapest_fit()
     assert offer.price_per_hour_usd <= 0.07

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from nemoguardian.schemas import (
     Mode,
-    ModerateRequest,
     ModelVerdict,
+    ModerateRequest,
     VerdictLabel,
 )
 

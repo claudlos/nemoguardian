@@ -12,7 +12,7 @@ Each plan declares:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 
 
@@ -119,18 +119,18 @@ def has_feature(plan: Plan, feature: str) -> bool:
 
 
 __all__ = [
-    "Tier",
-    "Plan",
-    "PLANS",
-    "get_plan",
-    "has_feature",
-    "STRIPE_PRODUCT_IDS",
-    "STRIPE_PRICE_IDS",
-    "FEATURE_FAST",
-    "FEATURE_STANDARD",
-    "FEATURE_DEEP",
-    "FEATURE_STREAM",
     "FEATURE_CUSTOM_POLICY",
+    "FEATURE_DEEP",
+    "FEATURE_FAST",
     "FEATURE_PRIORITY",
     "FEATURE_SELF_HOSTED",
+    "FEATURE_STANDARD",
+    "FEATURE_STREAM",
+    "PLANS",
+    "STRIPE_PRICE_IDS",
+    "STRIPE_PRODUCT_IDS",
+    "Plan",
+    "Tier",
+    "get_plan",
+    "has_feature",
 ]

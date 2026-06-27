@@ -20,9 +20,10 @@
 
 ## The headline demo moment
 
-Watch the cascade run on a **$0.07/hr RTX 3090** — the same Nemotron-CSR 4B
-reasoning model that NVIDIA publishes, on a GPU that costs less than a cup
-of coffee per hour. That's the part NVIDIA remembers.
+Watch the cascade run on a **Vast.ai RTX 3090-class 24GB GPU** — the same
+Nemotron-CSR 4B reasoning model that NVIDIA publishes, on commodity hardware.
+The `/health` panel in the demo shows the GPU, configured model IDs, quantization,
+and NVIDIA/OpenRouter triage status.
 
 ## What we built
 
@@ -88,12 +89,12 @@ trade-off that fits them. The demo UI (`/demo`) shows the cost comparison table 
 - Stripe subscription tiers + checkout + webhook + metered usage
 - Provider registry with 9 clouds; Vast.ai has live API client
 - Docker image + docker-compose for self-hosted
-- Cost comparison UI
+- `/demo` moderation console with per-model verdicts, reasoning, latency, policy rule, and cost table
 
 **Simulated for the demo:**
 - Other cloud providers return hard-coded catalog data so the cost table is honest
 - Multi-language 119-language live demo (English shown live; cached snapshots for others)
-- Real GPU inference will use a real Colab A100; 3090 will be demonstrated via a 30-sec curl
+- Billing/provisioning can run in demo mode when Stripe/Vast credentials are absent
 
 ## On-brief check
 
@@ -114,17 +115,14 @@ trade-off that fits them. The demo UI (`/demo`) shows the cost comparison table 
 ## The 90-second demo video flow
 
 ```
-0:00  Open nemoguardian demo UI. Cost comparison loads from /providers/offers.
-0:10  Top row: ★ RTX 3090 at $0.07/hr on Vast.ai.
-      Bottom row: H200 at $2.20/hr on Lyceum (EU-sovereign).
-0:18  "Same Nemotron cascade on all of these."
-0:25  Type a Discord-mock message: "drop your SSN in chat for $100"
-      Verdict flashes "unsafe" — PII + financial scam detected.
-0:40  Show the per-model breakdown: Qwen3Guard caught it in 30ms,
-      Nemotron-CSR reasoned about it in 200ms with the custom policy.
-1:00  Click "Provision Cheapest" button. Within seconds: a live instance
-      URL appears (mocked for the video, but real Vast.ai API call in code).
-1:15  Show the Docker image booting on that instance: cascade live.
+0:00  Open /demo. Header shows runtime device, model IDs, and triage provider.
+0:10  Cost comparison loads from /providers/offers with a low-cost Vast.ai option.
+0:20  Run: "drop your SSN in chat for $100" with discord preset.
+      Verdict returns unsafe with PII/policy breakdown.
+0:40  Run the finance example with policy "no financial advice".
+      Same cascade, different policy rule/audit trail.
+1:00  Switch mode to deep. Show NVIDIA/OpenRouter triage reasoning.
+1:15  Open /health or keep the header visible to prove real runtime config.
 1:30  End card: "nemoguardian — Nemotron + Qwen3Guard on commodity GPUs.
       $0.07/hr. 9 clouds. One docker image. Ship it."
 ```

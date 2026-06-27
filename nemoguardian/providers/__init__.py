@@ -25,8 +25,8 @@ from nemoguardian.providers.base import (
 )
 from nemoguardian.providers.registry import (
     default_registry,
-    list_providers,
     get_provider,
+    list_providers,
     provision_cheapest_fit,
 )
 
@@ -38,10 +38,10 @@ __all__ = [
     "ProviderName",
     "ProvisionError",
     "Registry",
-    "estimate_cascade_vram_gb",
-    "offers_fitting_cascade",
     "default_registry",
-    "list_providers",
+    "estimate_cascade_vram_gb",
     "get_provider",
+    "list_providers",
+    "offers_fitting_cascade",
     "provision_cheapest_fit",
 ]

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from nemoguardian.billing.plans import (
     FEATURE_CUSTOM_POLICY,
     FEATURE_DEEP,

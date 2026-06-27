@@ -23,7 +23,6 @@ from nemoguardian.billing import db
 from nemoguardian.billing.plans import (
     STRIPE_PRICE_IDS,
     Tier,
-    get_plan,
 )
 
 
@@ -51,8 +50,6 @@ def create_checkout_session(
         )
 
     api_key = os.environ.get("STRIPE_SECRET_KEY")
-    plan = get_plan(tier)
-
     if not api_key:
         # Demo / offline mode — short-circuit.
         customer = db.upsert_customer(email=email)
