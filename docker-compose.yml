@@ -7,8 +7,6 @@
 #   4. docker compose up -d
 #   5. curl http://localhost:8000/health
 
-version: "3.9"
-
 x-nemoguardian-env: &nemoguardian-env
   NEMOGUARDIAN_API_KEY: ${NEMOGUARDIAN_API_KEY:-nmg_change_me}
   NEMOGUARDIAN_SELF_HOSTED_EMAIL: ${NEMOGUARDIAN_SELF_HOSTED_EMAIL:-self-hosted@nemoguardian.local}
@@ -27,9 +25,11 @@ x-nemoguardian-env: &nemoguardian-env
 
 services:
   nemoguardian:
-    image: ghcr.io/claudlos/nemoguardian:latest
-    # Or build locally: `docker build -t nemoguardian/self-hosted:latest .`
-    # image: nemoguardian/self-hosted:latest
+    build:
+      context: .
+      args:
+        NEMOGUARDIAN_SKIP_PREDOWNLOAD: "1"
+    image: nemoguardian/self-hosted:latest
     runtime: nvidia
     ports:
       - "8000:8000"

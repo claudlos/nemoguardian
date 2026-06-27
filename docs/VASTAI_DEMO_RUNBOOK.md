@@ -72,6 +72,9 @@ Alternatively with compose:
 docker compose up --build
 ```
 
+The compose file builds `nemoguardian/self-hosted:latest` from the checked-out
+repo, so it does not require a pre-published container registry image.
+
 ## 4. Smoke Checks
 
 In a second shell:
