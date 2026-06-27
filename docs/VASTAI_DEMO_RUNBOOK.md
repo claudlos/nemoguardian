@@ -9,17 +9,16 @@ or OpenRouter.
 Use an RTX 3090/4090 or larger Vast.ai instance with Docker + NVIDIA runtime.
 The target is 24GB VRAM minimum.
 
-Clone or copy this repo to the instance. If a GitHub remote has been pushed,
-clone it directly:
+Clone the published repo directly:
 
 ```bash
 cd ~
-git clone <repo-url> nemoguardian
+git clone https://github.com/claudlos/nemoguardian nemoguardian
 cd nemoguardian
 ```
 
-If this is still only a local repo, create a git bundle locally and copy that
-single file to the GPU host:
+If the GPU host cannot reach GitHub, create a git bundle locally and copy that
+single file to the GPU host instead:
 
 ```bash
 cd /home/carlos/nemoguardian

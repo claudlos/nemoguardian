@@ -3,7 +3,7 @@
 **Hackathon:** Hermes Agent Accelerated Business Hackathon · NVIDIA × Stripe × Nous Research
 **Submission deadline:** EOD Tuesday, June 30, 2026
 **Built by:** Carlos
-**Repo:** `/home/carlos/nemoguardian`
+**Repo:** https://github.com/claudlos/nemoguardian
 
 ---
 
@@ -145,7 +145,7 @@ and ships with a Stripe + multi-cloud story that's real, not mocked.
 
 ## Links
 
-- Repo: `/home/carlos/nemoguardian`
+- Repo: https://github.com/claudlos/nemoguardian
 - Model/license manifest: `docs/THIRD_PARTY_MODELS.md`
 - Demo video: (to be recorded by Jun 30)
 - Substack / writeup: (to be posted)
