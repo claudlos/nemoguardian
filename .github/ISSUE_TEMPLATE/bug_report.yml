@@ -1,0 +1,87 @@
+name: Bug report
+description: Report broken behavior in nemoguardian — the cascade, billing, providers, or the demo UI.
+title: "[bug] "
+labels: ["bug", "triage"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Please fill out the sections below — minimal repros get fixed fastest.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear, concise description of the bug.
+      placeholder: |
+        The `/v1/moderate` endpoint returns 500 when I send a request with `mode=deep` and no triage API key set.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal commands to reproduce the bug. Code blocks preferred.
+      render: shell
+      placeholder: |
+        ```
+        curl -X POST http://localhost:8000/v1/moderate \
+          -H "Authorization: Bearer *** \
+          -H "Content-Type: application/json" \
+          -d '{"text":"hello","mode":"deep"}'
+        ```
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: input
+    id: commit
+    attributes:
+      label: Commit SHA
+      description: Output of `git rev-parse HEAD` in the failing checkout.
+      placeholder: "c728b2d"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: Install method
+      options:
+        - pip install -e .[dev]
+        - docker compose
+        - pre-built image
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: host
+    attributes:
+      label: Host
+      options:
+        - Local CPU
+        - Local GPU (specify in extras)
+        - Vast.ai
+        - RunPod
+        - Hetzner
+        - DigitalOcean
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / output
+      description: Paste the relevant server logs, traceback, or evidence JSON.
+      render: shell

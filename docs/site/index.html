@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0b0b0a">
+<title>nemoguardian — multi-model LLM moderation for agents</title>
+<meta name="description" content="nemoguardian is a plug-and-play multi-model LLM moderation cascade: Qwen3Guard + NVIDIA Nemotron Content Safety Reasoning + optional Nemotron 3 Ultra triage, packaged as a billable FastAPI service and a self-hosted Docker image for commodity GPUs starting at $0.07/hr.">
+<meta name="keywords" content="LLM moderation, content safety, Nemotron, Qwen3Guard, NVIDIA, AI agents, Discord moderation, Twitch moderation, FastAPI, Stripe, Docker, self-hosted, GPU, Vast.ai">
+<meta name="author" content="Carlos">
+
+<!-- Open Graph -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="nemoguardian — multi-model LLM moderation for agents">
+<meta property="og:description" content="Plug-and-play multi-model moderation cascade. Nemotron + Qwen3Guard, on commodity GPUs from $0.07/hr.">
+<meta property="og:image" content="./og-preview.svg">
+<meta property="og:url" content="https://claudlos.github.io/nemoguardian/">
+
+<!-- Twitter -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="nemoguardian — multi-model LLM moderation for agents">
+<meta name="twitter:description" content="Plug-and-play multi-model moderation cascade. Nemotron + Qwen3Guard, on commodity GPUs from $0.07/hr.">
+<meta name="twitter:image" content="./og-preview.svg">
+
+<link rel="icon" type="image/svg+xml" href="./favicon.svg">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+
+<nav class="topbar">
+  <div class="wrap nav">
+    <a class="brand" href="#top" aria-label="nemoguardian home">
+      <span class="logo" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="2" y="2" width="28" height="28" rx="7" fill="#76B900"/>
+          <path d="M9 11.5C9 9.567 10.567 8 12.5 8H15V13H11.5V15H15V20H12.5C10.567 20 9 18.433 9 16.5V11.5Z" fill="#0b0b0a"/>
+          <path d="M17 8H19.5C21.433 8 23 9.567 23 11.5V16.5C23 18.433 21.433 20 19.5 20H17V8ZM19.5 13H20.5V11.5H19.5V13Z" fill="#0b0b0a"/>
+        </svg>
+      </span>
+      <span class="brand-name">nemo<span class="brand-accent">guardian</span></span>
+    </a>
+    <div class="nav-links">
+      <a href="#cascade">Cascade</a>
+      <a href="#modes">Modes</a>
+      <a href="#providers">Pricing</a>
+      <a href="#quickstart">Quickstart</a>
+      <a href="#docs">Docs</a>
+      <a class="btn-ghost" href="https://github.com/claudlos/nemoguardian" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap hero-inner">
+    <div class="hero-copy">
+      <span class="eyebrow">Hackathon · NVIDIA × Stripe × Nous Research · June 30, 2026</span>
+      <h1>Multi-model LLM moderation, <span class="accent">plug-and-play.</span></h1>
+      <p class="lede">
+        A FastAPI service that classifies text as <strong>safe / controversial / unsafe</strong> by cascading
+        Qwen3Guard and NVIDIA Nemotron in series — packaged as a billable API and a self-hosted Docker image
+        for commodity GPUs starting at <strong>$0.07/hr</strong>.
+      </p>
+      <div class="cta-row">
+        <a class="btn primary" href="#quickstart">Get started</a>
+        <a class="btn" href="#cascade">See the cascade</a>
+        <a class="btn ghost" href="https://github.com/claudlos/nemoguardian" target="_blank" rel="noopener">★ Star on GitHub</a>
+      </div>
+      <ul class="hero-points">
+        <li><span class="dot ok"></span> One Docker image, every GPU — RTX 3090 → H100 → Hetzner</li>
+        <li><span class="dot ok"></span> Per-platform policy presets (Discord, Twitch, generic)</li>
+        <li><span class="dot ok"></span> Audit trail: every model's verdict, reasoning &amp; latency</li>
+        <li><span class="dot ok"></span> Stripe tiers + metered billing built in</li>
+      </ul>
+    </div>
+    <div class="hero-card" aria-label="Example moderation response">
+      <div class="card-head">
+        <span class="dot-r"></span><span class="dot-y"></span><span class="dot-g"></span>
+        <span class="card-title">POST /v1/moderate</span>
+      </div>
+      <pre class="card-body"><code><span class="cm">// request</span>
+{
+  <span class="k">"text"</span>: <span class="s">"Hey @everyone, drop your SSN and I will send $100 to whoever DMs me first"</span>,
+  <span class="k">"policy"</span>: <span class="s">"block PII and financial scams"</span>,
+  <span class="k">"mode"</span>: <span class="s">"standard"</span>
+}
+
+<span class="cm">// response (≈ 200ms)</span>
+{
+  <span class="k">"verdict"</span>: <span class="s2">"unsafe"</span>,
+  <span class="k">"score"</span>: <span class="n">0.97</span>,
+  <span class="k">"categories"</span>: [<span class="s2">"pii"</span>, <span class="s2">"scam"</span>],
+  <span class="k">"matched_rule"</span>: <span class="s2">"block-financial-scam"</span>,
+  <span class="k">"audit"</span>: [
+    { <span class="k">"model"</span>: <span class="s2">"qwen3guard-gen-4b"</span>,     <span class="k">"v"</span>: <span class="s2">"unsafe"</span>,  <span class="k">"ms"</span>: <span class="n">52</span> },
+    { <span class="k">"model"</span>: <span class="s2">"nemotron-csr-4b"</span>,       <span class="k">"v"</span>: <span class="s2">"unsafe"</span>,  <span class="k">"ms"</span>: <span class="n">214</span> }
+  ]
+}</code></pre>
+    </div>
+  </div>
+</header>
+
+<section class="band" id="cascade">
+  <div class="wrap">
+    <h2>The cascade</h2>
+    <p class="section-lede">
+      Cheap → expensive. Streaming → full-doc → custom policy → optional deep triage. You choose when to pay for the heavier reasoning path.
+    </p>
+
+    <div class="cascade-grid">
+      <div class="stage">
+        <div class="stage-head"><span class="stage-tag fast">fast</span><h3>Streaming guard</h3></div>
+        <div class="stage-model">Qwen/Qwen3Guard-Stream-0.6B</div>
+        <ul>
+          <li><strong>~1 ms / token</strong></li>
+          <li>Token-level streaming moderation</li>
+          <li>Catches obvious violations as the LLM types</li>
+        </ul>
+      </div>
+      <div class="stage">
+        <div class="stage-head"><span class="stage-tag std">standard</span><h3>Full-doc guard</h3></div>
+        <div class="stage-model">Qwen/Qwen3Guard-Gen-4B</div>
+        <ul>
+          <li><strong>~50 ms</strong> per message</li>
+          <li>119 languages, 3-tier (safe / controversial / unsafe)</li>
+          <li>Nuanced violations, multilingual</li>
+        </ul>
+      </div>
+      <div class="stage">
+        <div class="stage-head"><span class="stage-tag std">standard</span><h3>Custom-policy reasoning</h3></div>
+        <div class="stage-model">nvidia/Nemotron-Content-Safety-Reasoning-4B</div>
+        <ul>
+          <li><strong>~200 ms</strong> per message</li>
+          <li>Reasoning-on, enforces your YAML policy</li>
+          <li>Topic-following, jailbreak detection</li>
+        </ul>
+      </div>
+      <div class="stage">
+        <div class="stage-head"><span class="stage-tag deep">deep</span><h3>Deep triage</h3></div>
+        <div class="stage-model">nvidia/nemotron-3-ultra-550b-a55b <span class="muted">(API-only)</span></div>
+        <ul>
+          <li><strong>~300 ms</strong> per batch</li>
+          <li>Adjudicates disagreements</li>
+          <li>Explains the verdict in plain English</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="diagram" aria-hidden="true">
+      <div class="dl-node">text / token stream</div>
+      <div class="dl-arrow">│</div>
+      <div class="dl-row">
+        <div class="dl-card fast">fast<br><span>Qwen3Guard-Stream</span></div>
+        <div class="dl-card std">standard<br><span>Qwen3Guard-Gen + Nemotron-CSR</span></div>
+        <div class="dl-card deep">deep<br><span>standard + Nemotron 3 Ultra</span></div>
+      </div>
+      <div class="dl-arrow">▼</div>
+      <div class="dl-node">aggregator → NemoClaw policy gate → { verdict, reasons, scores, audit_log }</div>
+    </div>
+  </div>
+</section>
+
+<section class="band alt" id="modes">
+  <div class="wrap">
+    <h2>Modes</h2>
+    <p class="section-lede">Callers pick a mode per request. Pay only for the reasoning you need.</p>
+    <div class="modes-grid">
+      <article class="mode">
+        <h3>fast</h3>
+        <p>Token-level streaming moderation. Sub-millisecond per token. For LLM output filtering, live chat token streams, anywhere you'd reach for a regex but want better recall.</p>
+        <code>POST /v1/moderate/stream</code>
+      </article>
+      <article class="mode">
+        <h3>standard <span class="badge">default</span></h3>
+        <p>Full-document cascade: Qwen3Guard-Gen + Nemotron-CSR. Covers 119 languages with custom YAML policy enforcement. This is the workhorse.</p>
+        <code>POST /v1/moderate</code>
+      </article>
+      <article class="mode">
+        <h3>deep</h3>
+        <p>Standard + API-backed Nemotron 3 Ultra triage. Use it when the local guards disagree, when the customer needs a richer explanation, or for audit reports.</p>
+        <code>POST /v1/moderate?mode=deep</code>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="providers">
+  <div class="wrap">
+    <h2>One image. Every GPU. Pick your price.</h2>
+    <p class="section-lede">
+      The same Docker image runs everywhere. Customers pick the price/perf trade-off.
+      The demo target is a Vast.ai RTX 3090 at <strong>$0.07/hr</strong>.
+    </p>
+    <div class="provider-table-wrap">
+      <table class="provider-table">
+        <thead><tr><th>GPU</th><th>VRAM</th><th>$/hr</th><th>Provider</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td><strong>RTX 3090</strong></td><td>24 GB</td><td><strong>$0.07</strong></td><td>Vast.ai / Salad</td><td>Cheapest viable host. FP16 cascade.</td></tr>
+          <tr><td>L4 / RTX 3090</td><td>24 GB</td><td>$0.12 – 0.14</td><td>RunPod</td><td>—</td></tr>
+          <tr><td>A100</td><td>40 GB</td><td>$0.14</td><td>Vast.ai</td><td>Mature vLLM, production-grade.</td></tr>
+          <tr><td>RTX 4090</td><td>24 GB</td><td>$0.18</td><td>Vast.ai</td><td>—</td></tr>
+          <tr><td>H100</td><td>80 GB</td><td>$0.19</td><td>Vast.ai</td><td>Flagship.</td></tr>
+          <tr><td>RTX 5090</td><td>32 GB</td><td>$0.21</td><td>Vast.ai</td><td>Best $/perf sweet spot.</td></tr>
+          <tr><td>L40S</td><td>48 GB</td><td>$0.50</td><td>RunPod</td><td>—</td></tr>
+          <tr><td>Hetzner GEX131</td><td>96 GB</td><td>$1.92</td><td>Hetzner (DE)</td><td>Dedicated. EU GDPR.</td></tr>
+          <tr><td>DO H100</td><td>80 GB</td><td>$3.39</td><td>DigitalOcean</td><td>Enterprise.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted small">Total VRAM at FP16: ~17.5 GB minimum, 24 GB comfortable, 32 GB headroom.</p>
+  </div>
+</section>
+
+<section class="band alt" id="quickstart">
+  <div class="wrap">
+    <h2>Quickstart</h2>
+    <p class="section-lede">Up and running in three commands. First moderation call downloads model weights.</p>
+    <div class="code-grid">
+      <div>
+        <h3>Local</h3>
+        <pre><code>$ python3 -m venv .venv &amp;&amp; . .venv/bin/activate
+$ pip install -e ".[dev]"
+$ NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT=1 \
+    python -m nemoguardian serve --port 8000
+
+# open http://localhost:8000/demo
+</code></pre>
+      </div>
+      <div>
+        <h3>Self-hosted (GPU)</h3>
+        <pre><code>$ cp .env.example .env       # set NEMOGUARDIAN_API_KEY
+$ docker compose up --build
+
+$ docker compose exec nemoguardian \
+    python scripts/real_model_smoke.py
+
+$ curl -X POST http://localhost:8000/v1/moderate \
+    -H "Authorization: Bearer $NEMOG...EY" \
+    -H "Content-Type: application/json" \
+    -d '{"text":"hello world","mode":"standard"}'
+</code></pre>
+      </div>
+    </div>
+    <p class="muted small">
+      The <code>/demo/moderate</code> endpoint is disabled by default — opt in only for controlled demo hosts.
+      Production calls go through <code>POST /v1/moderate</code> with a real <code>nmg_...</code> API key.
+    </p>
+  </div>
+</section>
+
+<section class="band" id="docs">
+  <div class="wrap">
+    <h2>Documentation</h2>
+    <p class="section-lede">Everything you need to evaluate, run, and ship.</p>
+    <div class="docs-grid">
+      <a class="doc-card" href="https://github.com/claudlos/nemoguardian/blob/main/README.md">
+        <h3>README</h3>
+        <p>Quickstart, architecture, GPU targets, what's real vs. demo-mode.</p>
+      </a>
+      <a class="doc-card" href="https://github.com/claudlos/nemoguardian/blob/main/SUBMISSION.md">
+        <h3>Submission writeup</h3>
+        <p>The 60-second pitch and the NVIDIA / Stripe partnership story.</p>
+      </a>
+      <a class="doc-card" href="https://github.com/claudlos/nemoguardian/blob/main/docs/JUDGE_GUIDE.md">
+        <h3>Judge guide</h3>
+        <p>Fast review path without GPU. Routes, billing flow, provider catalog.</p>
+      </a>
+      <a class="doc-card" href="https://github.com/claudlos/nemoguardian/blob/main/docs/VASTAI_DEMO_RUNBOOK.md">
+        <h3>Vast.ai runbook</h3>
+        <p>GPU host checklist. Provision → boot → smoke → record.</p>
+      </a>
+      <a class="doc-card" href="https://github.com/claudlos/nemoguardian/blob/main/docs/MODEL_CATALOG.md">
+        <h3>Model catalog</h3>
+        <p>Full model survey: Qwen3Guard, Nemotron, Llama Guard, alternatives.</p>
+      </a>
+      <a class="doc-card" href="https://github.com/claudlos/nemoguardian/blob/main/docs/THIRD_PARTY_MODELS.md">
+        <h3>Third-party models</h3>
+        <p>License &amp; terms manifest for every runtime model.</p>
+      </a>
+      <a class="doc-card" href="https://github.com/claudlos/nemoguardian/blob/main/docs/PRE_SUBMIT_CHECKLIST.md">
+        <h3>Pre-submit checklist</h3>
+        <p>Final gate before recording the demo video.</p>
+      </a>
+      <a class="doc-card" href="https://github.com/claudlos/nemoguardian/blob/main/docs/VIDEO_SCRIPT.md">
+        <h3>Video script</h3>
+        <p>60–90 second shot list and narration.</p>
+      </a>
+    </div>
+  </div>
+</section>
+
+<section class="band alt security">
+  <div class="wrap two-col">
+    <div>
+      <h2>Security posture</h2>
+      <p>
+        This is a hackathon submission. The first audit closed the critical issues — webhook trust-on-empty-secret,
+        raw API key in webhook responses, and demo-endpoint-on-by-default. The remaining open items
+        (rate limiting, container-as-root, verbose errors, SQLite hygiene, SSH-key shell interpolation) are
+        documented and tracked.
+      </p>
+      <p>
+        Production deployments should run behind an authenticated reverse proxy, set
+        <code>NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT=0</code>, supply a non-placeholder <code>NEMOGUARDIAN_API_KEY</code>,
+        and review <code>SECURITY.md</code> before exposing the service to the internet.
+      </p>
+      <a class="btn ghost" href="https://github.com/claudlos/nemoguardian/blob/main/SECURITY.md">Read SECURITY.md →</a>
+    </div>
+    <div class="status-card">
+      <h3>Audit status</h3>
+      <ul class="status-list">
+        <li><span class="ok">✓</span> Webhook trust-on-empty-secret — fixed (fail-closed)</li>
+        <li><span class="ok">✓</span> Raw API key in webhook response — fixed (returns id only)</li>
+        <li><span class="ok">✓</span> Demo endpoint on by default — fixed (opt-in)</li>
+        <li><span class="warn">~</span> Webhook replay protection — partial (300s tolerance; idempotency pending)</li>
+        <li><span class="open">·</span> CORS wildcard, prompt injection, rate limiting, container hardening — tracked</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="wrap foot">
+    <div>
+      <div class="brand">
+        <span class="logo" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="2" y="2" width="28" height="28" rx="7" fill="#76B900"/>
+            <path d="M9 11.5C9 9.567 10.567 8 12.5 8H15V13H11.5V15H15V20H12.5C10.567 20 9 18.433 9 16.5V11.5Z" fill="#0b0b0a"/>
+            <path d="M17 8H19.5C21.433 8 23 9.567 23 11.5V16.5C23 18.433 21.433 20 19.5 20H17V8ZM19.5 13H20.5V11.5H19.5V13Z" fill="#0b0b0a"/>
+          </svg>
+        </span>
+        <span class="brand-name">nemo<span class="brand-accent">guardian</span></span>
+      </div>
+      <p class="muted small">Apache-2.0 · Built for the Hermes Agent Accelerated Business Hackathon.</p>
+    </div>
+    <div class="foot-links">
+      <a href="https://github.com/claudlos/nemoguardian">Repo</a>
+      <a href="https://github.com/claudlos/nemoguardian/issues">Issues</a>
+      <a href="https://github.com/claudlos/nemoguardian/blob/main/SECURITY.md">Security</a>
+      <a href="https://github.com/claudlos/nemoguardian/blob/main/LICENSE">License</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // Smooth scroll for in-page anchors
+  document.querySelectorAll('a[href^="#"]').forEach(a => {
+    a.addEventListener('click', e => {
+      const id = a.getAttribute('href');
+      if (id.length > 1) {
+        const el = document.querySelector(id);
+        if (el) { e.preventDefault(); el.scrollIntoView({behavior:'smooth', block:'start'}); }
+      }
+    });
+  });
+</script>
+</body>
+</html>
