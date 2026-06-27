@@ -63,6 +63,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
 
 # Boot with uvicorn. Customers override NEMOGUARDIAN_API_KEY via env or runtime secret.
 ENV NEMOGUARDIAN_API_KEY=${NEMOGUARDIAN_API_KEY:-nmg_default_change_me} \
+    NEMOGUARDIAN_SELF_HOSTED_EMAIL=${NEMOGUARDIAN_SELF_HOSTED_EMAIL:-self-hosted@nemoguardian.local} \
     NEMOGUARDIAN_TIER=${NEMOGUARDIAN_TIER:-self_hosted} \
     NEMOGUARDIAN_CASCADE_MODE=${NEMOGUARDIAN_CASCADE_MODE:-standard} \
     NEMOGUARDIAN_QUANTIZE=${NEMOGUARDIAN_QUANTIZE:-1} \

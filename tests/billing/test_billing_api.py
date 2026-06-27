@@ -19,6 +19,9 @@ from nemoguardian.schemas import ModelVerdict, ModerateResponse, VerdictLabel
 def isolated_db(monkeypatch, tmp_path):
     db_path = tmp_path / "nmg_test.db"
     monkeypatch.setenv("NEMOGUARDIAN_DB_PATH", str(db_path))
+    monkeypatch.delenv("NEMOGUARDIAN_API_KEY", raising=False)
+    monkeypatch.delenv("NEMOGUARDIAN_TIER", raising=False)
+    monkeypatch.delenv("NEMOGUARDIAN_SELF_HOSTED_EMAIL", raising=False)
     monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
     monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
     billing_db._conn = None
@@ -156,6 +159,32 @@ def test_webhook_signature_required_when_secret_set(client, monkeypatch):
 
 def test_moderate_requires_api_key(client):
     r = client.post("/v1/moderate", json={"text": "drop your SSN"})
+    assert r.status_code == 401
+
+
+def test_env_api_key_bootstraps_self_hosted_customer(client, monkeypatch):
+    monkeypatch.setenv("NEMOGUARDIAN_API_KEY", "nmg_env_real_test_key")
+    monkeypatch.setenv("NEMOGUARDIAN_TIER", "self_hosted")
+    monkeypatch.setenv("NEMOGUARDIAN_SELF_HOSTED_EMAIL", "box@example.com")
+    r = client.post(
+        "/v1/moderate",
+        json={"text": "drop your SSN", "mode": "deep"},
+        headers={"Authorization": "Bearer nmg_env_real_test_key"},
+        params={"policy_preset": "discord"},
+    )
+    assert r.status_code == 200, r.text
+    customer = billing_db.get_customer_by_email("box@example.com")
+    assert customer is not None
+    assert customer.tier == "self_hosted"
+
+
+def test_placeholder_env_api_key_is_not_accepted(client, monkeypatch):
+    monkeypatch.setenv("NEMOGUARDIAN_API_KEY", "nmg_change_me")
+    r = client.post(
+        "/v1/moderate",
+        json={"text": "hello", "mode": "fast"},
+        headers={"Authorization": "Bearer nmg_change_me"},
+    )
     assert r.status_code == 401
 
 

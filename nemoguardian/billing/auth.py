@@ -6,6 +6,7 @@ header resolves to a Customer, which the handler uses to enforce tier limits.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Annotated
 
@@ -13,6 +14,13 @@ from fastapi import Header, HTTPException, status
 
 from nemoguardian.billing import db
 from nemoguardian.billing.plans import Plan, Tier, get_plan
+
+_PLACEHOLDER_ENV_KEYS = {
+    "",
+    "nmg_change_me",
+    "nmg_default_change_me",
+    "nmg_paste_your_key_here",
+}
 
 
 @dataclass
@@ -47,6 +55,8 @@ async def require_api_key(
         )
     customer = db.lookup_customer_by_api_key(raw_key)
     if customer is None:
+        customer = _lookup_env_bootstrap_customer(raw_key)
+    if customer is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid or revoked API key",
@@ -75,6 +85,29 @@ def _upgrade_target(feature: str) -> Tier:
         if feature in PLANS[tier].features:
             return tier
     return Tier.SCALE  # fallback
+
+
+def _lookup_env_bootstrap_customer(raw_key: str) -> db.Customer | None:
+    """Resolve the self-hosted env API key without requiring a pre-seeded DB row."""
+    env_key = os.environ.get("NEMOGUARDIAN_API_KEY", "").strip()
+    if env_key in _PLACEHOLDER_ENV_KEYS or raw_key != env_key:
+        return None
+
+    tier = _env_tier()
+    email = os.environ.get("NEMOGUARDIAN_SELF_HOSTED_EMAIL", "self-hosted@nemoguardian.local")
+    customer = db.upsert_customer(email=email)
+    if customer.tier_enum != tier:
+        db.set_customer_tier(customer.id, tier)
+        customer = db.get_customer(customer.id)
+    return customer
+
+
+def _env_tier() -> Tier:
+    raw = os.environ.get("NEMOGUARDIAN_TIER", Tier.SELF_HOSTED.value)
+    try:
+        return Tier(raw)
+    except ValueError:
+        return Tier.SELF_HOSTED
 
 
 __all__ = ["AuthContext", "enforce_feature", "require_api_key"]

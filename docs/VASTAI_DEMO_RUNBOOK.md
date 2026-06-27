@@ -1,0 +1,111 @@
+# Vast.ai Real-Model Demo Runbook
+
+This is the June 30 recording path for `nemoguardian`: real Qwen3Guard +
+Nemotron-CSR on a 24GB GPU, with optional Nemotron 3 Ultra triage through NVIDIA
+or OpenRouter.
+
+## 1. Provision
+
+Use an RTX 3090/4090 or larger Vast.ai instance with Docker + NVIDIA runtime.
+The target is 24GB VRAM minimum.
+
+Clone or copy this repo to the instance:
+
+```bash
+cd ~
+git clone <repo-url> nemoguardian
+cd nemoguardian
+```
+
+## 2. Configure
+
+Create `.env`:
+
+```bash
+cat > .env <<'ENV'
+NEMOGUARDIAN_API_KEY=nmg_replace_with_demo_key
+NEMOGUARDIAN_SELF_HOSTED_EMAIL=self-hosted@nemoguardian.local
+NEMOGUARDIAN_TIER=self_hosted
+NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT=1
+
+NEMOGUARDIAN_QUANTIZE=1
+NEMOGUARDIAN_QWEN_MODEL=Qwen/Qwen3Guard-Gen-4B
+NEMOGUARDIAN_QWEN_STREAM_MODEL=Qwen/Qwen3Guard-Stream-0.6B
+NEMOGUARDIAN_CSR_MODEL=nvidia/Nemotron-Content-Safety-Reasoning-4B
+NEMOGUARDIAN_TRIAGE_MODEL=nvidia/nemotron-3-ultra-220b-a12b
+
+# Set one of these.
+NVIDIA_API_KEY=
+OPENROUTER_API_KEY=
+NEMOGUARDIAN_TRIAGE_BASE_URL=
+ENV
+```
+
+If using OpenRouter only, set:
+
+```bash
+NEMOGUARDIAN_TRIAGE_BASE_URL=https://openrouter.ai/api/v1
+```
+
+## 3. Build And Run
+
+```bash
+docker build -t nemoguardian/self-hosted:latest .
+docker run --rm --gpus all --env-file .env -p 8000:8000 nemoguardian/self-hosted:latest
+```
+
+Alternatively with compose:
+
+```bash
+docker compose up --build
+```
+
+## 4. Smoke Checks
+
+In a second shell:
+
+```bash
+curl -s http://localhost:8000/health | python -m json.tool
+curl -s http://localhost:8000/providers/offers?only_fits=true | python -m json.tool | head -80
+```
+
+Expected:
+
+- `runtime_device` reports CUDA/GPU.
+- `model_config` shows Qwen3Guard-Gen-4B and Nemotron-CSR.
+- `triage_configured` is `true` when NVIDIA/OpenRouter key is set.
+
+Run real-model smoke:
+
+```bash
+docker exec -it <container_id> python scripts/real_model_smoke.py
+docker exec -it <container_id> python scripts/real_model_smoke.py --deep
+```
+
+If running from a local Python environment on the host instead of Docker:
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
+pip install -e .
+python scripts/real_model_smoke.py
+python scripts/real_model_smoke.py --deep
+```
+
+## 5. Record
+
+Open:
+
+```text
+http://<instance-ip>:8000/demo
+```
+
+Sequence:
+
+1. Show the header with GPU/model/triage status.
+2. Run the PII scam example with `discord` preset.
+3. Run the finance example with policy `no financial advice`.
+4. Switch to `deep` mode and show triage reasoning.
+5. Scroll to the GPU offer table showing the cheap Vast.ai option.
+
+Do not record a final take until both real-model smoke commands pass.

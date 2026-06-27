@@ -81,6 +81,9 @@ curl -X POST 'http://localhost:8000/demo/moderate?policy_preset=discord' \
 Production API calls use `POST /v1/moderate` with `Authorization: Bearer <nmg_...>`
 so billing and tier limits can run. The `/demo/moderate` endpoint is for the
 hackathon recording path and can be disabled with `NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT=0`.
+For self-hosted Docker, a non-placeholder `NEMOGUARDIAN_API_KEY` also bootstraps
+a local self-hosted customer so `/v1/moderate` works on a fresh instance without
+manually seeding SQLite.
 
 ## Real-model demo config
 
@@ -109,6 +112,8 @@ Before recording on the GPU host, run:
 python scripts/real_model_smoke.py
 python scripts/real_model_smoke.py --deep  # requires NVIDIA_API_KEY or OPENROUTER_API_KEY
 ```
+
+See `docs/VASTAI_DEMO_RUNBOOK.md` for the full GPU host checklist.
 
 ## Modes
 
