@@ -112,6 +112,12 @@ python scripts/real_model_smoke.py
 python scripts/real_model_smoke.py --deep
 ```
 
+After the service is running, capture one evidence file for the submission:
+
+```bash
+make demo-check DEMO_CHECK_FLAGS="--wait-seconds 120 --require-gpu --require-triage --moderate --deep --output demo-evidence.json"
+```
+
 ## 5. Record
 
 Open:

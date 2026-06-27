@@ -149,6 +149,8 @@ and ships with a Stripe + multi-cloud story that's real, not mocked.
 - Model/license manifest: `docs/THIRD_PARTY_MODELS.md`
 - Demo runbook: `docs/VASTAI_DEMO_RUNBOOK.md`
 - Pre-submit checklist: `docs/PRE_SUBMIT_CHECKLIST.md`
+- Hackathon form draft: `docs/SUBMISSION_FORM.md`
 - Demo video script: `docs/VIDEO_SCRIPT.md`
+- Demo evidence: `demo-evidence.json` from `make demo-check` on the GPU host
 - Final demo video: add hosted recording URL after GPU smoke passes
 - Public writeup: use this file as the source, or adapt it for the final post

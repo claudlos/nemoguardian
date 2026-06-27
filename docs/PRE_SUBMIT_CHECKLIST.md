@@ -68,6 +68,12 @@ python scripts/real_model_smoke.py
 python scripts/real_model_smoke.py --deep
 ```
 
+- The running service passes the host check and writes evidence:
+
+```bash
+make demo-check DEMO_CHECK_FLAGS="--wait-seconds 120 --require-gpu --require-triage --moderate --deep --output demo-evidence.json"
+```
+
 ## 5. Recording
 
 Use `docs/VIDEO_SCRIPT.md`.
@@ -85,5 +91,6 @@ Submit these:
 
 - Repository: https://github.com/claudlos/nemoguardian
 - Model/license manifest: `docs/THIRD_PARTY_MODELS.md`
+- Form draft: `docs/SUBMISSION_FORM.md`
 - Demo video: final hosted recording URL
 - Writeup: `SUBMISSION.md`, or a public post adapted from it
