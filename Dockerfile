@@ -46,6 +46,14 @@ COPY docs ./docs
 COPY scripts ./scripts
 COPY README.md SUBMISSION.md LICENSE NOTICE ./
 
+# Create an unprivileged runtime user and give it ownership of the app tree and
+# the HuggingFace cache so model weights download on first boot. Build steps run
+# as root; only the runtime (uvicorn) drops privileges.
+RUN groupadd --system --gid 1001 app \
+    && useradd --system --uid 1001 --gid app --no-create-home --home-dir /opt/nemoguardian app \
+    && mkdir -p /home/app/.cache/huggingface /var/lib/nemoguardian \
+    && chown -R app:app /opt/nemoguardian /opt/venv /home/app /var/lib/nemoguardian
+
 # Pre-download default models at build time so first boot is fast.
 # Override with NEMOGUARDIAN_SKIP_PREDOWNLOAD=1 for slim builds.
 ARG NEMOGUARDIAN_SKIP_PREDOWNLOAD=0
@@ -70,6 +78,11 @@ ENV NEMOGUARDIAN_SELF_HOSTED_EMAIL=self-hosted@nemoguardian.local \
     NEMOGUARDIAN_QWEN_STREAM_MODEL=Qwen/Qwen3Guard-Stream-0.6B \
     NEMOGUARDIAN_CSR_MODEL=nvidia/Nemotron-Content-Safety-Reasoning-4B \
     NEMOGUARDIAN_TRIAGE_MODEL=nvidia/nemotron-3-ultra-550b-a55b \
-    NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT=0
+    NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT=0 \
+    HOME=/home/app \
+    HF_HOME=/home/app/.cache/huggingface \
+    NEMOGUARDIAN_DB_PATH=/var/lib/nemoguardian/nemoguardian.db
+
+USER app
 
 CMD ["uvicorn", "nemoguardian.server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
