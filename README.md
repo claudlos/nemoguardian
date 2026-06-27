@@ -124,8 +124,8 @@ running the intended real-model path.
 Before recording on the GPU host, run:
 
 ```bash
-python scripts/real_model_smoke.py
-python scripts/real_model_smoke.py --deep  # requires NVIDIA_API_KEY or OPENROUTER_API_KEY
+docker compose exec nemoguardian python scripts/real_model_smoke.py
+docker compose exec nemoguardian python scripts/real_model_smoke.py --deep  # requires NVIDIA_API_KEY or OPENROUTER_API_KEY
 ```
 
 See `docs/VASTAI_DEMO_RUNBOOK.md` for the full GPU host checklist.

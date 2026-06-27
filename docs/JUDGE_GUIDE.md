@@ -78,8 +78,8 @@ docker compose up --build
 In another shell on the GPU host:
 
 ```bash
-python scripts/real_model_smoke.py
-python scripts/real_model_smoke.py --deep
+docker compose exec nemoguardian python scripts/real_model_smoke.py
+docker compose exec nemoguardian python scripts/real_model_smoke.py --deep
 make demo-check DEMO_CHECK_FLAGS="--wait-seconds 120 --require-gpu --require-triage --moderate --deep --output demo-evidence.json"
 ```
 

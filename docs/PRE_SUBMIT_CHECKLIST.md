@@ -53,7 +53,7 @@ Run:
 
 ```bash
 docker run --rm --entrypoint sh nemoguardian/self-hosted:latest \
-  -c 'test -s /opt/nemoguardian/LICENSE && test -s /opt/nemoguardian/NOTICE && test -s /opt/nemoguardian/docs/THIRD_PARTY_MODELS.md'
+  -c 'test -s /opt/nemoguardian/LICENSE && test -s /opt/nemoguardian/NOTICE && test -s /opt/nemoguardian/docs/THIRD_PARTY_MODELS.md && test -s /opt/nemoguardian/docs/MODEL_CATALOG.md'
 ```
 
 ## 4. GPU Demo Host
@@ -70,9 +70,12 @@ Required proof before recording:
 - Both real-model smoke commands pass:
 
 ```bash
-python scripts/real_model_smoke.py
-python scripts/real_model_smoke.py --deep
+docker compose exec nemoguardian python scripts/real_model_smoke.py
+docker compose exec nemoguardian python scripts/real_model_smoke.py --deep
 ```
+
+If running the service from an activated host virtualenv instead of Docker,
+`make smoke` and `make smoke-deep` are equivalent.
 
 - The running service passes the host check and writes evidence:
 
