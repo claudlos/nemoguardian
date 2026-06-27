@@ -7,7 +7,7 @@ Use this after the GPU host passes `docs/PRE_SUBMIT_CHECKLIST.md`.
 ## Setup
 
 - Browser: `http://<instance-ip>:8000/demo`
-- Secondary tab or terminal: `curl -s http://localhost:8000/health | python -m json.tool`
+- Secondary tab or terminal: `curl -s http://localhost:8000/health | python3 -m json.tool`
 - Keep API keys and `.env` values off screen.
 - Use the Discord preset first.
 - Start with this policy:

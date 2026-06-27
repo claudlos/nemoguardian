@@ -34,7 +34,7 @@ cd nemoguardian
 Create `.env`:
 
 ```bash
-DEMO_API_KEY="nmg_demo_$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
+DEMO_API_KEY="nmg_demo_$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
 
 cat > .env <<ENV
 NEMOGUARDIAN_API_KEY=$DEMO_API_KEY
@@ -86,8 +86,8 @@ repo, so it does not require a pre-published container registry image.
 In a second shell:
 
 ```bash
-curl -s http://localhost:8000/health | python -m json.tool
-curl -s http://localhost:8000/providers/offers?only_fits=true | python -m json.tool | head -80
+curl -s http://localhost:8000/health | python3 -m json.tool
+curl -s http://localhost:8000/providers/offers?only_fits=true | python3 -m json.tool | head -80
 ```
 
 Expected:
@@ -108,7 +108,7 @@ credentials before loading weights. Override the default 20GB preflight only if
 you are intentionally testing a smaller host:
 
 ```bash
-NEMOGUARDIAN_SMOKE_MIN_VRAM_GB=12 python scripts/real_model_smoke.py
+docker exec -e NEMOGUARDIAN_SMOKE_MIN_VRAM_GB=12 -it <container_id> python scripts/real_model_smoke.py
 ```
 
 If running from a local Python environment on the host instead of Docker:
