@@ -60,6 +60,10 @@ def test_demo_host_check_writes_passing_light_evidence(monkeypatch, tmp_path):
     assert demo_host_check.main() == 0
     evidence = json.loads(output.read_text())
     assert evidence["passed"] is True
+    assert evidence["tool"] == "demo_host_check"
+    assert evidence["generated_at"]
+    assert evidence["repo"]["short_commit"]
+    assert evidence["requirements"]["require_gpu"] is False
     assert {check["name"] for check in evidence["checks"]} >= {
         "health_reachable",
         "model_config",
@@ -111,6 +115,8 @@ def test_demo_host_check_gpu_and_triage_requirements_fail_on_cpu(monkeypatch, tm
 
     assert demo_host_check.main() == 1
     evidence = json.loads(output.read_text())
+    assert evidence["requirements"]["require_gpu"] is True
+    assert evidence["requirements"]["require_triage"] is True
     failed = {check["name"] for check in evidence["checks"] if not check["ok"]}
     assert failed == {"runtime_gpu", "triage_configured"}
 
@@ -171,6 +177,7 @@ def test_demo_host_check_deep_moderation_requires_triage_model(monkeypatch, tmp_
 
     assert demo_host_check.main() == 1
     evidence = json.loads(output.read_text())
+    assert evidence["requirements"]["deep"] is True
     failed = {check["name"] for check in evidence["checks"] if not check["ok"]}
     assert failed == {"deep_triage_result"}
 

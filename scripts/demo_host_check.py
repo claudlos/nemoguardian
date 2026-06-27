@@ -8,8 +8,10 @@ health, the demo page, provider offers, and production auth boundaries. Add
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import os
+import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -68,7 +70,17 @@ def main() -> int:
     args = parser.parse_args()
 
     evidence: dict[str, Any] = {
+        "tool": "demo_host_check",
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "base_url": args.base_url.rstrip("/"),
+        "requirements": {
+            "require_gpu": args.require_gpu,
+            "require_triage": args.require_triage,
+            "max_cheapest_usd": args.max_cheapest_usd,
+            "moderate": args.moderate,
+            "deep": args.deep,
+        },
+        "repo": _repo_metadata(),
         "checks": [],
     }
 
@@ -305,6 +317,32 @@ def _request(
         return exc.code, exc.read().decode("utf-8", errors="replace")
     except (ConnectionError, OSError, URLError) as exc:
         return 0, str(exc)
+
+
+def _repo_metadata() -> dict[str, str | bool | None]:
+    status = _git_output("status", "--porcelain")
+    return {
+        "branch": _git_output("branch", "--show-current"),
+        "commit": _git_output("rev-parse", "HEAD"),
+        "short_commit": _git_output("rev-parse", "--short", "HEAD"),
+        "dirty": None if status is None else bool(status),
+    }
+
+
+def _git_output(*args: str) -> str | None:
+    root = Path(__file__).resolve().parents[1]
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except Exception:
+        return None
+    return result.stdout.strip() or None
 
 
 def _json(body: str) -> Any:

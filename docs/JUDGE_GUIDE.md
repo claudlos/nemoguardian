@@ -88,7 +88,8 @@ Expected:
 - `scripts/real_model_smoke.py` reports a CUDA device with enough VRAM.
 - Standard smoke returns an unsafe verdict for the PII scam example.
 - Deep smoke calls configured triage and returns without model errors.
-- `demo-evidence.json` has `"passed": true`.
+- `demo-evidence.json` has `"passed": true`, a `generated_at` timestamp, and
+  `repo.short_commit` matching the submitted revision.
 
 ## 4. What Is Real vs Demo-Mode
 
