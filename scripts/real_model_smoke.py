@@ -18,13 +18,72 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+
 def main() -> int:
-    from nemoguardian.cascade import Cascade, CascadeConfig
+    from nemoguardian.cascade import Cascade
     from nemoguardian.policy.presets import get_preset
     from nemoguardian.schemas import Mode, ModerateRequest, VerdictLabel
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--deep", action="store_true", help="Also call configured triage API")
+    parser.add_argument(
+        "--text",
+        default="Hey @everyone, drop your SSN and I will send $100 to whoever DMs me first",
+        help="Moderation text used for the smoke request",
+    )
+    parser.add_argument(
+        "--policy",
+        default="block PII and financial scams",
+        help="Policy text used for the smoke request",
+    )
+    parser.add_argument(
+        "--policy-preset",
+        default="discord",
+        help="Built-in policy preset used for the smoke request",
+    )
+    parser.add_argument("--qwen-model", help="Override NEMOGUARDIAN_QWEN_MODEL")
+    parser.add_argument("--qwen-stream-model", help="Override NEMOGUARDIAN_QWEN_STREAM_MODEL")
+    parser.add_argument("--csr-model", help="Override NEMOGUARDIAN_CSR_MODEL")
+    parser.add_argument("--triage-model", help="Override NEMOGUARDIAN_TRIAGE_MODEL")
+    parser.add_argument("--triage-base-url", help="Override NEMOGUARDIAN_TRIAGE_BASE_URL")
+    parser.add_argument(
+        "--quantize",
+        choices=("env", "on", "off"),
+        default="env",
+        help="Set both local model 4-bit flags for profile tests",
+    )
+    parser.add_argument(
+        "--qwen-4bit",
+        choices=("env", "on", "off"),
+        default="env",
+        help="Override Qwen3Guard-Gen 4-bit loading",
+    )
+    parser.add_argument(
+        "--csr-4bit",
+        choices=("env", "on", "off"),
+        default="env",
+        help="Override Nemotron-CSR 4-bit loading",
+    )
+    parser.add_argument(
+        "--disable-qwen-gen",
+        action="store_true",
+        help="Skip Qwen3Guard-Gen in the smoke request",
+    )
+    parser.add_argument(
+        "--disable-qwen-stream",
+        action="store_true",
+        help="Skip Qwen3Guard-Stream in the smoke request",
+    )
+    parser.add_argument(
+        "--disable-csr",
+        action="store_true",
+        help="Skip Nemotron-CSR in the smoke request",
+    )
+    parser.add_argument(
+        "--disable-triage",
+        action="store_true",
+        help="Skip Nemotron triage in the smoke request",
+    )
     parser.add_argument(
         "--min-vram-gb",
         type=float,
@@ -43,13 +102,18 @@ def main() -> int:
         if preflight_code:
             return preflight_code
 
-    cascade = Cascade(CascadeConfig.from_env())
-    policy = get_preset("discord")
+    config = _config_from_args(args)
+    cascade = Cascade(config)
+    policy = get_preset(args.policy_preset)
     mode = Mode.DEEP if args.deep else Mode.STANDARD
     request = ModerateRequest(
-        text="Hey @everyone, drop your SSN and I will send $100 to whoever DMs me first",
-        policy="block PII and financial scams",
+        text=args.text,
+        policy=args.policy,
         mode=mode,
+        use_qwen_stream=not args.disable_qwen_stream,
+        use_qwen_gen=not args.disable_qwen_gen,
+        use_nemotron_csr=not args.disable_csr,
+        use_nemotron_triage=not args.disable_triage,
     )
     result = cascade.moderate(request, policy_engine=policy)
     print(json.dumps(result.model_dump(), indent=2, default=str))
@@ -62,6 +126,45 @@ def main() -> int:
         print(f"expected unsafe verdict, got {result.verdict.value}", file=sys.stderr)
         return 3
     return 0
+
+
+def _config_from_args(args: argparse.Namespace):
+    from nemoguardian.cascade import CascadeConfig
+
+    config = CascadeConfig.from_env()
+    if args.qwen_model:
+        config.qwen_gen_model = args.qwen_model
+    if args.qwen_stream_model:
+        config.qwen_stream_model = args.qwen_stream_model
+    if args.csr_model:
+        config.csr_model = args.csr_model
+    if args.triage_model:
+        config.triage_model = args.triage_model
+    if args.triage_base_url:
+        config.triage_base_url = args.triage_base_url
+
+    quantize = _flag_value(args.quantize)
+    if quantize is not None:
+        config.qwen_gen_4bit = quantize
+        config.csr_4bit = quantize
+
+    qwen_4bit = _flag_value(args.qwen_4bit)
+    if qwen_4bit is not None:
+        config.qwen_gen_4bit = qwen_4bit
+
+    csr_4bit = _flag_value(args.csr_4bit)
+    if csr_4bit is not None:
+        config.csr_4bit = csr_4bit
+
+    return config
+
+
+def _flag_value(raw: str) -> bool | None:
+    if raw == "on":
+        return True
+    if raw == "off":
+        return False
+    return None
 
 
 def _preflight(*, deep: bool, min_vram_gb: float) -> int:

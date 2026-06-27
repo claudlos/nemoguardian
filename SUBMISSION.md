@@ -42,7 +42,7 @@ A Python package + FastAPI server + Docker image that:
 | 1. Fast stream | `Qwen/Qwen3Guard-Stream-0.6B` | Qwen team (Apache 2.0) | ~1ms/token | streaming token-level |
 | 2. Full-doc guard | `Qwen/Qwen3Guard-Gen-4B` | Qwen team (Apache 2.0) | ~50ms | 119 languages, 3-tier |
 | 3. Custom policy | `nvidia/Nemotron-Content-Safety-Reasoning-4B` | NVIDIA (Jan 2026) | ~200ms | reasoning-on mode |
-| 4. Deep triage | `nvidia/nemotron-3-ultra-220b-a12b` | NVIDIA NIM / OpenRouter | ~300ms | adjudicates disagreements |
+| 4. Deep triage | `nvidia/nemotron-3-ultra-550b-a55b` | NVIDIA NIM / OpenRouter | ~300ms | adjudicates disagreements |
 
 Total VRAM at FP16: **~17.5GB minimum, 24GB comfortable, 32GB headroom.**
 

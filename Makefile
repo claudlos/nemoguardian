@@ -1,4 +1,4 @@
-.PHONY: install-dev lint test verify serve smoke smoke-deep demo-check pre-submit-local final-submission-check docker-build docker-run
+.PHONY: install-dev lint test verify serve smoke smoke-deep demo-check framework-smoke pre-submit-local final-submission-check docker-build docker-run
 
 PYTHON ?= .venv/bin/python
 PORT ?= 8000
@@ -6,6 +6,7 @@ IMAGE ?= nemoguardian/self-hosted:latest
 DOCKER_BUILD_PROGRESS ?= plain
 DEMO_BASE_URL ?= http://localhost:8000
 DEMO_CHECK_FLAGS ?=
+FRAMEWORK_SMOKE_FLAGS ?=
 FINAL_CHECK_FLAGS ?=
 
 install-dev:
@@ -32,6 +33,9 @@ smoke-deep:
 
 demo-check:
 	$(PYTHON) scripts/demo_host_check.py --base-url $(DEMO_BASE_URL) $(DEMO_CHECK_FLAGS)
+
+framework-smoke:
+	$(PYTHON) scripts/framework_smoke.py --base-url $(DEMO_BASE_URL) $(FRAMEWORK_SMOKE_FLAGS)
 
 pre-submit-local:
 	$(PYTHON) scripts/pre_submit_local.py --image $(IMAGE)

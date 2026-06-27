@@ -87,6 +87,7 @@ In another shell on the GPU host:
 ```bash
 docker compose exec nemoguardian python scripts/real_model_smoke.py
 docker compose exec nemoguardian python scripts/real_model_smoke.py --deep
+make framework-smoke FRAMEWORK_SMOKE_FLAGS="--require-gpu --require-triage --moderate --output framework-evidence.json"
 make demo-check DEMO_CHECK_FLAGS="--wait-seconds 120 --require-gpu --require-triage --moderate --deep --output demo-evidence.json"
 ```
 
@@ -95,6 +96,8 @@ Expected:
 - `scripts/real_model_smoke.py` reports a CUDA device with enough VRAM.
 - Standard smoke returns an unsafe verdict for the PII scam example.
 - Deep smoke calls configured triage and returns without model errors.
+- `framework-evidence.json` verifies Discord/Twitch/webhook adapter behavior
+  without requiring public bot credentials.
 - `demo-evidence.json` has `"passed": true`, a `generated_at` timestamp, and
   `repo.short_commit` matching the submitted revision.
 

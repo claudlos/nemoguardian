@@ -12,17 +12,22 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from collections.abc import Callable
 
 from nemoguardian.cascade import Cascade, CascadeConfig
 from nemoguardian.policy.presets import get_preset
 from nemoguardian.schemas import Mode, ModerateRequest, VerdictLabel
 
 
-def make_moderator():
-    cascade = Cascade(CascadeConfig.from_env())
+def make_moderator(
+    cascade: Cascade | None = None,
+    *,
+    emit: Callable[[str], None] = print,
+):
+    cascade = cascade or Cascade(CascadeConfig.from_env())
     policy = get_preset("twitch")
 
-    async def moderate(text: str) -> None:
+    async def moderate(text: str) -> str:
         request = ModerateRequest(text=text, mode=Mode.FAST)
         result = await asyncio.to_thread(cascade.moderate, request, policy_engine=policy)
         # In a real Twitch integration: send /delete or /timeout via PRIVMSG.
@@ -31,7 +36,8 @@ def make_moderator():
             VerdictLabel.CONTROVERSIAL: "flag",
             VerdictLabel.UNSAFE: "delete",
         }.get(result.verdict, "allow")
-        print(f"[twitch] {action}: {text[:60]} ({result.verdict.value}, score={result.score})")
+        emit(f"[twitch] {action}: {text[:60]} ({result.verdict.value}, score={result.score})")
+        return action
 
     return moderate
 

@@ -6,7 +6,13 @@ import json
 import sys
 from types import SimpleNamespace
 
-from scripts import demo_host_check, final_submission_check, pre_submit_local, real_model_smoke
+from scripts import (
+    demo_host_check,
+    final_submission_check,
+    framework_smoke,
+    pre_submit_local,
+    real_model_smoke,
+)
 
 
 def test_demo_host_check_writes_passing_light_evidence(monkeypatch, tmp_path):
@@ -201,6 +207,50 @@ def test_demo_host_check_repo_metadata_reports_clean_status(monkeypatch):
         "commit": "abc123",
         "short_commit": "abc",
         "dirty": False,
+    }
+
+
+def test_framework_smoke_writes_adapter_evidence(monkeypatch, tmp_path):
+    def fake_request(base_url, path, **kwargs):
+        if path == "/health":
+            return 200, json.dumps({
+                "status": "ok",
+                "runtime_device": "cuda: RTX 3090",
+                "gpu_available": True,
+                "triage_configured": True,
+                "triage_provider": "openrouter",
+            })
+        raise AssertionError(f"unexpected request: {path}")
+
+    output = tmp_path / "framework-evidence.json"
+    monkeypatch.setattr(framework_smoke, "_request", fake_request)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "framework_smoke.py",
+            "--base-url",
+            "http://demo.test",
+            "--require-gpu",
+            "--require-triage",
+            "--output",
+            str(output),
+        ],
+    )
+
+    assert framework_smoke.main() == 0
+    evidence = json.loads(output.read_text())
+    assert evidence["tool"] == "framework_smoke"
+    assert evidence["passed"] is True
+    assert {check["name"] for check in evidence["checks"]} >= {
+        "runtime_gpu",
+        "triage_configured",
+        "discord_unsafe_delete",
+        "discord_controversial_reaction",
+        "discord_bot_ignored",
+        "twitch_delete_action",
+        "webhook_auth_header",
+        "webhook_forward_payload",
     }
 
 
@@ -458,6 +508,30 @@ def test_real_model_smoke_preflight_accepts_deep_gpu_with_key(monkeypatch):
     monkeypatch.setenv("NVIDIA_API_KEY", "set-but-not-real")
 
     assert real_model_smoke._preflight(deep=True, min_vram_gb=20) == 0
+
+
+def test_real_model_smoke_model_profile_overrides(monkeypatch):
+    monkeypatch.delenv("NEMOGUARDIAN_QWEN_MODEL", raising=False)
+    args = SimpleNamespace(
+        qwen_model="Qwen/Qwen3Guard-Gen-8B",
+        qwen_stream_model="Qwen/Qwen3Guard-Stream-0.6B",
+        csr_model="nvidia/Nemotron-Content-Safety-Reasoning-4B",
+        triage_model="nvidia/nemotron-3-ultra-550b-a55b:free",
+        triage_base_url="https://openrouter.ai/api/v1",
+        quantize="on",
+        qwen_4bit="off",
+        csr_4bit="env",
+    )
+
+    config = real_model_smoke._config_from_args(args)
+
+    assert config.qwen_gen_model == "Qwen/Qwen3Guard-Gen-8B"
+    assert config.qwen_stream_model == "Qwen/Qwen3Guard-Stream-0.6B"
+    assert config.csr_model == "nvidia/Nemotron-Content-Safety-Reasoning-4B"
+    assert config.triage_model == "nvidia/nemotron-3-ultra-550b-a55b:free"
+    assert config.triage_base_url == "https://openrouter.ai/api/v1"
+    assert config.qwen_gen_4bit is False
+    assert config.csr_4bit is True
 
 
 def _write_json(path, data):

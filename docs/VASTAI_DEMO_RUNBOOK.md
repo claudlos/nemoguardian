@@ -129,6 +129,53 @@ python scripts/real_model_smoke.py
 python scripts/real_model_smoke.py --deep
 ```
 
+### Optional Larger-Model Profiles
+
+The verified RTX 3090 baseline is Qwen3Guard-Gen-4B + Nemotron-CSR-4B in FP16
+on the current Vast PyTorch image. Larger local guards should be tested as
+targeted profiles, not as the default recording path.
+
+Qwen3Guard-Gen-8B can be profiled by itself on a compatible 4-bit stack:
+
+```bash
+python scripts/real_model_smoke.py \
+  --qwen-model Qwen/Qwen3Guard-Gen-8B \
+  --quantize on \
+  --disable-csr
+```
+
+If the base image raises a quantization compatibility error, switch to a newer
+PyTorch/bitsandbytes image before rerunning that profile. Do not attempt to load
+Nemotron 3 Ultra locally on a 3090; keep it API-backed through NVIDIA or
+OpenRouter.
+
+### Framework And Bot Adapter Smoke
+
+After the service is live, run the adapter/framework smoke check. This verifies
+the running host plus credential-safe Discord, Twitch, and generic webhook
+adapter behavior:
+
+```bash
+make framework-smoke DEMO_BASE_URL=http://<instance-ip>:8000 \
+  FRAMEWORK_SMOKE_FLAGS="--require-gpu --require-triage --moderate --output framework-evidence.json"
+```
+
+To exercise the authenticated webhook path as well, pass the self-hosted API key
+only through the shell environment:
+
+```bash
+NEMOGUARDIAN_API_KEY=<secret> make framework-smoke DEMO_BASE_URL=http://<instance-ip>:8000 \
+  FRAMEWORK_SMOKE_FLAGS="--require-gpu --require-triage --moderate --live-webhook --require-api-key --output framework-evidence.json"
+```
+
+Real Discord/Twitch network runs require out-of-repo credentials:
+
+```bash
+pip install -e ".[discord,twitch]"
+DISCORD_BOT_TOKEN=<secret> python -m nemoguardian.adapters.discord
+TWITCH_TOKEN=<secret> python -m nemoguardian.adapters.twitch <channel>
+```
+
 After the service is running, capture one evidence file for the submission:
 
 ```bash

@@ -139,6 +139,17 @@ docker compose exec nemoguardian python scripts/real_model_smoke.py
 docker compose exec nemoguardian python scripts/real_model_smoke.py --deep  # requires NVIDIA_API_KEY or OPENROUTER_API_KEY
 ```
 
+For 3090 experiments beyond the verified 4B baseline, keep the service default
+unchanged and run a targeted smoke profile. Example: test Qwen3Guard-Gen-8B by
+itself with quantized loading on a compatible PyTorch/bitsandbytes image:
+
+```bash
+python scripts/real_model_smoke.py \
+  --qwen-model Qwen/Qwen3Guard-Gen-8B \
+  --quantize on \
+  --disable-csr
+```
+
 See `docs/VASTAI_DEMO_RUNBOOK.md` for the full GPU host checklist.
 Use `docs/PRE_SUBMIT_CHECKLIST.md` as the final submission gate and
 `docs/VIDEO_SCRIPT.md` for the 60-90 second recording. `docs/SUBMISSION_FORM.md`
@@ -149,6 +160,13 @@ After the GPU service is running, capture a submission evidence file with:
 
 ```bash
 make demo-check DEMO_CHECK_FLAGS="--wait-seconds 120 --require-gpu --require-triage --moderate --deep --output demo-evidence.json"
+```
+
+To verify the Discord/Twitch/webhook framework wiring against the running host:
+
+```bash
+make framework-smoke DEMO_BASE_URL=http://<host>:8000 \
+  FRAMEWORK_SMOKE_FLAGS="--require-gpu --require-triage --moderate --output framework-evidence.json"
 ```
 
 After the hosted video URL is pasted into `docs/SUBMISSION_FORM.md`, run:
@@ -233,6 +251,7 @@ nemoguardian/
 │   └── console_demo.py        ← terminal demo
 └── scripts/
     ├── real_model_smoke.py    ← GPU-host smoke check
+    ├── framework_smoke.py     ← adapter/framework end-to-end check
     └── demo_host_check.py     ← running-demo evidence check
 ```
 

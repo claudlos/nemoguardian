@@ -16,6 +16,8 @@ from nemoguardian.cascade import Cascade, CascadeConfig
 from nemoguardian.policy.presets import get_preset
 from nemoguardian.schemas import Mode, ModerateRequest, VerdictLabel
 
+WARNING_REACTION = "\N{WARNING SIGN}\N{VARIATION SELECTOR-16}"
+
 
 def make_handler(cascade: Cascade | None = None):
     """Build an async message handler that runs the cascade."""
@@ -30,11 +32,11 @@ def make_handler(cascade: Cascade | None = None):
         if result.verdict == VerdictLabel.UNSAFE:
             await message.delete()
             await message.channel.send(
-                f"⚠️ {message.author.mention}, that message was blocked by nemoguardian: "
+                f"{WARNING_REACTION} {message.author.mention}, that message was blocked by nemoguardian: "
                 f"{', '.join(result.categories) or 'policy violation'}"
             )
         elif result.verdict == VerdictLabel.CONTROVERSIAL:
-            await message.add_reaction("⚠️")
+            await message.add_reaction(WARNING_REACTION)
 
     return on_message
 
@@ -67,4 +69,4 @@ if __name__ == "__main__":
     run_bot()
 
 
-__all__ = ["make_handler", "run_bot"]
+__all__ = ["WARNING_REACTION", "make_handler", "run_bot"]
