@@ -212,4 +212,6 @@ nemoguardian/
 
 ## License
 
-Apache 2.0. Models retain their own licenses — see `docs/MODEL_CATALOG.md`.
+Apache 2.0 for this repository's code. Model weights and hosted model APIs
+retain their own licenses and terms; see `docs/THIRD_PARTY_MODELS.md` and
+`docs/MODEL_CATALOG.md`.

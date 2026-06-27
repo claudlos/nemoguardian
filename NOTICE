@@ -1,0 +1,9 @@
+nemoguardian
+Copyright 2026 Carlos
+
+This product includes software developed for the nemoguardian hackathon
+submission and distributed under the Apache License, Version 2.0.
+
+Model weights are not redistributed in this repository or Docker image. The
+runtime downloads or calls third-party models under their own licenses and
+terms. See docs/THIRD_PARTY_MODELS.md for the submission manifest.

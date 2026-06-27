@@ -44,7 +44,7 @@ COPY nemoguardian ./nemoguardian
 COPY demo ./demo
 COPY docs ./docs
 COPY scripts ./scripts
-COPY README.md SUBMISSION.md ./
+COPY README.md SUBMISSION.md LICENSE NOTICE ./
 
 # Pre-download default models at build time so first boot is fast.
 # Override with NEMOGUARDIAN_SKIP_PREDOWNLOAD=1 for slim builds.

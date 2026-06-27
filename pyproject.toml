@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Multi-model LLM moderation cascade (Nemotron + Qwen3Guard). Hackathon project."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Apache-2.0" }
+license = { file = "LICENSE" }
 authors = [
   { name = "Carlos" },
 ]
@@ -61,6 +61,9 @@ Homepage = "https://github.com/claudlos/nemoguardian"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["nemoguardian*"]
+
+[tool.setuptools]
+license-files = ["LICENSE", "NOTICE"]
 
 [tool.ruff]
 line-length = 100

@@ -146,5 +146,6 @@ and ships with a Stripe + multi-cloud story that's real, not mocked.
 ## Links
 
 - Repo: `/home/carlos/nemoguardian`
+- Model/license manifest: `docs/THIRD_PARTY_MODELS.md`
 - Demo video: (to be recorded by Jun 30)
 - Substack / writeup: (to be posted)
