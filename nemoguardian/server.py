@@ -89,11 +89,31 @@ app = FastAPI(
     version="0.1.0",
 )
 
+
+def _cors_origins() -> list[str]:
+    """Parse NEMOGUARDIAN_CORS_ORIGINS (comma-separated) into an allowlist.
+
+    The demo console is served same-origin from /demo, so the API needs no
+    cross-origin access in a normal self-hosted deploy. Unset = deny all
+    cross-origin requests; "*" is retained only as an explicit, logged opt-in.
+    """
+    raw = os.environ.get("NEMOGUARDIAN_CORS_ORIGINS", "").strip()
+    if not raw:
+        return []
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    if "*" in origins:
+        logger.warning(
+            "cors_wildcard_enabled",
+            note="NEMOGUARDIAN_CORS_ORIGINS=* permits any origin; do not ship this.",
+        )
+    return origins
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins(),
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 
@@ -387,7 +407,7 @@ async def billing_provision(
     job = await billing_provisioning.provision_instance(
         customer_id=auth.customer.id,
         provider=req.provider,
-        ssh_public_key=req.ssh_public_key,
+        ssh_public_key=billing_provisioning.validate_ssh_public_key(req.ssh_public_key),
     )
     return ProvisioningResponse(job_id=job.id, status=job.status)
 
@@ -508,7 +528,7 @@ async def billing_provision_cheapest(
     }
     try:
         offer, instance = await provision_cheapest_fit(
-            ssh_public_key=ssh_public_key,
+            ssh_public_key=billing_provisioning.validate_ssh_public_key(ssh_public_key),
             image=image,
             env=env,
             max_price_usd=max_price_usd,
@@ -578,7 +598,10 @@ async def billing_provision_specific(
     }
     try:
         instance = await provider.provision(
-            offer, ssh_public_key=ssh_public_key, image=image, env=env,
+            offer,
+            ssh_public_key=billing_provisioning.validate_ssh_public_key(ssh_public_key),
+            image=image,
+            env=env,
         )
     except ProvisionError as exc:
         raise HTTPException(502, f"{provider_name} provisioning failed: {exc}") from exc
