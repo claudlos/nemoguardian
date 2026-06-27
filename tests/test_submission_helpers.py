@@ -182,6 +182,28 @@ def test_demo_host_check_deep_moderation_requires_triage_model(monkeypatch, tmp_
     assert failed == {"deep_triage_result"}
 
 
+def test_demo_host_check_repo_metadata_reports_clean_status(monkeypatch):
+    def fake_run(cmd, **kwargs):
+        if cmd[1:] == ["status", "--porcelain"]:
+            return SimpleNamespace(stdout="")
+        if cmd[1:] == ["branch", "--show-current"]:
+            return SimpleNamespace(stdout="main\n")
+        if cmd[1:] == ["rev-parse", "HEAD"]:
+            return SimpleNamespace(stdout="abc123\n")
+        if cmd[1:] == ["rev-parse", "--short", "HEAD"]:
+            return SimpleNamespace(stdout="abc\n")
+        raise AssertionError(f"unexpected git command: {cmd}")
+
+    monkeypatch.setattr(demo_host_check.subprocess, "run", fake_run)
+
+    assert demo_host_check._repo_metadata() == {
+        "branch": "main",
+        "commit": "abc123",
+        "short_commit": "abc",
+        "dirty": False,
+    }
+
+
 def test_pre_submit_local_runs_expected_gate(monkeypatch, tmp_path):
     commands: list[list[str]] = []
 

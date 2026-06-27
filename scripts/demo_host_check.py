@@ -320,7 +320,7 @@ def _request(
 
 
 def _repo_metadata() -> dict[str, str | bool | None]:
-    status = _git_output("status", "--porcelain")
+    status = _git_output("status", "--porcelain", allow_empty=True)
     return {
         "branch": _git_output("branch", "--show-current"),
         "commit": _git_output("rev-parse", "HEAD"),
@@ -329,7 +329,7 @@ def _repo_metadata() -> dict[str, str | bool | None]:
     }
 
 
-def _git_output(*args: str) -> str | None:
+def _git_output(*args: str, allow_empty: bool = False) -> str | None:
     root = Path(__file__).resolve().parents[1]
     try:
         result = subprocess.run(
@@ -342,7 +342,10 @@ def _git_output(*args: str) -> str | None:
         )
     except Exception:
         return None
-    return result.stdout.strip() or None
+    output = result.stdout.strip()
+    if output or allow_empty:
+        return output
+    return None
 
 
 def _json(body: str) -> Any:
