@@ -74,18 +74,19 @@ agent infrastructure product.
 
 ## Demo Instructions
 
-1. Follow `docs/VASTAI_DEMO_RUNBOOK.md`.
-2. Run `make verify` and `make docker-build`.
-3. Start the GPU host with Docker or compose.
-4. Run `python scripts/real_model_smoke.py`.
-5. Run `python scripts/real_model_smoke.py --deep`.
-6. Run:
+1. Review `docs/JUDGE_GUIDE.md`.
+2. Follow `docs/VASTAI_DEMO_RUNBOOK.md`.
+3. Run `make verify` and `make docker-build`.
+4. Start the GPU host with Docker or compose.
+5. Run `python scripts/real_model_smoke.py`.
+6. Run `python scripts/real_model_smoke.py --deep`.
+7. Run:
 
 ```bash
 make demo-check DEMO_CHECK_FLAGS="--wait-seconds 120 --require-gpu --require-triage --moderate --deep --output demo-evidence.json"
 ```
 
-7. Record using `docs/VIDEO_SCRIPT.md`.
+8. Record using `docs/VIDEO_SCRIPT.md`.
 
 ## Tags
 
@@ -96,6 +97,7 @@ Docker, self-hosted, GPU, Vast.ai
 
 - Repo: https://github.com/claudlos/nemoguardian
 - Model/license manifest: `docs/THIRD_PARTY_MODELS.md`
+- Judge guide: `docs/JUDGE_GUIDE.md`
 - Demo runbook: `docs/VASTAI_DEMO_RUNBOOK.md`
 - Pre-submit checklist: `docs/PRE_SUBMIT_CHECKLIST.md`
 - Video script: `docs/VIDEO_SCRIPT.md`

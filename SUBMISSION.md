@@ -148,6 +148,7 @@ and ships with a Stripe + multi-cloud story that's real, not mocked.
 - Repo: https://github.com/claudlos/nemoguardian
 - Model/license manifest: `docs/THIRD_PARTY_MODELS.md`
 - Demo runbook: `docs/VASTAI_DEMO_RUNBOOK.md`
+- Judge guide: `docs/JUDGE_GUIDE.md`
 - Pre-submit checklist: `docs/PRE_SUBMIT_CHECKLIST.md`
 - Hackathon form draft: `docs/SUBMISSION_FORM.md`
 - Demo video script: `docs/VIDEO_SCRIPT.md`

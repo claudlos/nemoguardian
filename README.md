@@ -127,7 +127,8 @@ python scripts/real_model_smoke.py --deep  # requires NVIDIA_API_KEY or OPENROUT
 See `docs/VASTAI_DEMO_RUNBOOK.md` for the full GPU host checklist.
 Use `docs/PRE_SUBMIT_CHECKLIST.md` as the final submission gate and
 `docs/VIDEO_SCRIPT.md` for the 60-90 second recording. `docs/SUBMISSION_FORM.md`
-has copy/paste answers for the final hackathon form.
+has copy/paste answers for the final hackathon form. `docs/JUDGE_GUIDE.md`
+is the fastest path for reviewers to verify the repo without a GPU.
 
 After the GPU service is running, capture a submission evidence file with:
 
