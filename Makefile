@@ -3,6 +3,7 @@
 PYTHON ?= .venv/bin/python
 PORT ?= 8000
 IMAGE ?= nemoguardian/self-hosted:latest
+DOCKER_BUILD_PROGRESS ?= plain
 
 install-dev:
 	python3 -m venv --system-site-packages .venv
@@ -27,7 +28,7 @@ smoke-deep:
 	$(PYTHON) scripts/real_model_smoke.py --deep
 
 docker-build:
-	docker build --build-arg NEMOGUARDIAN_SKIP_PREDOWNLOAD=1 -t $(IMAGE) .
+	docker build --progress=$(DOCKER_BUILD_PROGRESS) --build-arg NEMOGUARDIAN_SKIP_PREDOWNLOAD=1 -t $(IMAGE) .
 
 docker-run:
 	docker run --rm --gpus all --env-file .env -p $(PORT):8000 $(IMAGE)

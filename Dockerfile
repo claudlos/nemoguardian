@@ -61,16 +61,15 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Boot with uvicorn. Customers override NEMOGUARDIAN_API_KEY via env or runtime secret.
-ENV NEMOGUARDIAN_API_KEY=${NEMOGUARDIAN_API_KEY:-nmg_default_change_me} \
-    NEMOGUARDIAN_SELF_HOSTED_EMAIL=${NEMOGUARDIAN_SELF_HOSTED_EMAIL:-self-hosted@nemoguardian.local} \
-    NEMOGUARDIAN_TIER=${NEMOGUARDIAN_TIER:-self_hosted} \
-    NEMOGUARDIAN_CASCADE_MODE=${NEMOGUARDIAN_CASCADE_MODE:-standard} \
-    NEMOGUARDIAN_QUANTIZE=${NEMOGUARDIAN_QUANTIZE:-1} \
-    NEMOGUARDIAN_QWEN_MODEL=${NEMOGUARDIAN_QWEN_MODEL:-Qwen/Qwen3Guard-Gen-4B} \
-    NEMOGUARDIAN_QWEN_STREAM_MODEL=${NEMOGUARDIAN_QWEN_STREAM_MODEL:-Qwen/Qwen3Guard-Stream-0.6B} \
-    NEMOGUARDIAN_CSR_MODEL=${NEMOGUARDIAN_CSR_MODEL:-nvidia/Nemotron-Content-Safety-Reasoning-4B} \
-    NEMOGUARDIAN_TRIAGE_MODEL=${NEMOGUARDIAN_TRIAGE_MODEL:-nvidia/nemotron-3-ultra-220b-a12b} \
-    NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT=${NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT:-1}
+# Boot with uvicorn. Supply NEMOGUARDIAN_API_KEY at runtime via env or secret.
+ENV NEMOGUARDIAN_SELF_HOSTED_EMAIL=self-hosted@nemoguardian.local \
+    NEMOGUARDIAN_TIER=self_hosted \
+    NEMOGUARDIAN_CASCADE_MODE=standard \
+    NEMOGUARDIAN_QUANTIZE=1 \
+    NEMOGUARDIAN_QWEN_MODEL=Qwen/Qwen3Guard-Gen-4B \
+    NEMOGUARDIAN_QWEN_STREAM_MODEL=Qwen/Qwen3Guard-Stream-0.6B \
+    NEMOGUARDIAN_CSR_MODEL=nvidia/Nemotron-Content-Safety-Reasoning-4B \
+    NEMOGUARDIAN_TRIAGE_MODEL=nvidia/nemotron-3-ultra-220b-a12b \
+    NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT=1
 
 CMD ["uvicorn", "nemoguardian.server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
