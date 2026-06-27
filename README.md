@@ -157,13 +157,13 @@ make demo-check DEMO_CHECK_FLAGS="--wait-seconds 120 --require-gpu --require-tri
 - NemoClaw policy gate (yaml → decision)
 - Discord bot adapter with token-level streaming
 - Per-platform policy presets
-- Stripe subscriptions + metered billing + webhook
+- Stripe subscriptions + customer portal + metered billing + webhook
 - 9-cloud provider registry (Vast.ai live, others stubbed with real catalog data)
 - Docker image + docker-compose for self-hosted
 
 **Simulated / cached for the demo video:**
-- Multi-language demo runs (English shown live; cached snapshots for the other 118)
-- The "live Argus dashboard" overlay in the demo video (real logs, mocked for some panels)
+- Non-Vast provider prices use static catalog rows unless their provider credentials are wired.
+- Stripe checkout and portal sessions fall back to demo URLs when Stripe secrets are absent.
 
 ## Providers (self-hosted tier)
 

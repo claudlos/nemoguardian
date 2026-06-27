@@ -26,6 +26,8 @@ from nemoguardian.billing.schemas import (
     CheckoutResponse,
     CreateKeyRequest,
     CreateKeyResponse,
+    PortalRequest,
+    PortalResponse,
     ProvisioningRequest,
     ProvisioningResponse,
     UsageResponse,
@@ -318,6 +320,23 @@ async def billing_checkout_endpoint(req: CheckoutRequest) -> CheckoutResponse:
 async def billing_webhook_endpoint(request: Request) -> dict:
     """Stripe webhook receiver (subscription lifecycle)."""
     return await billing_webhook.handle_stripe_webhook(request)
+
+
+@app.post("/billing/portal", response_model=PortalResponse)
+async def billing_portal_endpoint(
+    req: PortalRequest,
+    auth: billing_auth.AuthContext = Depends(billing_auth.require_api_key),
+) -> PortalResponse:
+    """Create a Stripe customer-portal session for plan changes and cancellation."""
+    session = billing_checkout.create_portal_session(
+        customer=auth.customer,
+        return_url=req.return_url,
+    )
+    return PortalResponse(
+        url=session.url,
+        demo_mode=session.demo_mode,
+        customer_id=auth.customer.id,
+    )
 
 
 @app.post("/billing/keys", response_model=CreateKeyResponse)

@@ -33,6 +33,12 @@ class CheckoutSession:
     demo_mode: bool
 
 
+@dataclass
+class PortalSession:
+    url: str
+    demo_mode: bool
+
+
 def create_checkout_session(
     *, email: str, tier: Tier, success_url: str, cancel_url: str
 ) -> CheckoutSession:
@@ -115,11 +121,11 @@ def create_checkout_session(
         )
 
 
-def create_portal_session(*, customer: db.Customer, return_url: str) -> str:
+def create_portal_session(*, customer: db.Customer, return_url: str) -> PortalSession:
     """Open the Stripe-hosted Customer Portal for plan changes / cancellation."""
     api_key = os.environ.get("STRIPE_SECRET_KEY")
     if not api_key or not customer.stripe_customer_id:
-        return f"{return_url}?demo=portal"
+        return PortalSession(url=f"{return_url}?demo=portal", demo_mode=True)
     try:
         import stripe
 
@@ -128,9 +134,14 @@ def create_portal_session(*, customer: db.Customer, return_url: str) -> str:
             customer=customer.stripe_customer_id,
             return_url=return_url,
         )
-        return session.url
+        return PortalSession(url=session.url, demo_mode=False)
     except Exception:
-        return f"{return_url}?demo=portal"
+        return PortalSession(url=f"{return_url}?demo=portal", demo_mode=True)
 
 
-__all__ = ["CheckoutSession", "create_checkout_session", "create_portal_session"]
+__all__ = [
+    "CheckoutSession",
+    "PortalSession",
+    "create_checkout_session",
+    "create_portal_session",
+]

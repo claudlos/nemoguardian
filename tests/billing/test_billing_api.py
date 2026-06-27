@@ -157,6 +157,21 @@ def test_webhook_signature_required_when_secret_set(client, monkeypatch):
     assert r.status_code == 400
 
 
+def test_portal_returns_demo_session_for_authenticated_customer(client):
+    customer = billing_db.upsert_customer(email="portal@example.com")
+    raw, _ = billing_db.create_api_key(customer.id, label="portal-test")
+    r = client.post(
+        "/billing/portal",
+        json={"return_url": "https://example.test/account"},
+        headers={"Authorization": f"Bearer {raw}"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["customer_id"] == customer.id
+    assert body["demo_mode"] is True
+    assert body["url"] == "https://example.test/account?demo=portal"
+
+
 def test_moderate_requires_api_key(client):
     r = client.post("/v1/moderate", json={"text": "drop your SSN"})
     assert r.status_code == 401

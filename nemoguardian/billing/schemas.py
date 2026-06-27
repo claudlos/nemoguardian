@@ -23,6 +23,16 @@ class CheckoutResponse(BaseModel):
     customer_id: int
 
 
+class PortalRequest(BaseModel):
+    return_url: str = Field(default="https://nemoguardian.dev/billing")
+
+
+class PortalResponse(BaseModel):
+    url: str
+    demo_mode: bool
+    customer_id: int
+
+
 class UsageResponse(BaseModel):
     customer_id: int
     email: str
@@ -64,6 +74,8 @@ __all__ = [
     "CheckoutResponse",
     "CreateKeyRequest",
     "CreateKeyResponse",
+    "PortalRequest",
+    "PortalResponse",
     "ProvisioningRequest",
     "ProvisioningResponse",
     "TierName",

@@ -81,18 +81,18 @@ trade-off that fits them. The demo UI (`/demo`) shows the cost comparison table 
 ## What's real vs. simulated for the demo
 
 **Real, shipping:**
-- The FastAPI server with 16 application endpoints plus generated OpenAPI docs
+- The FastAPI server with 17 application endpoints plus generated OpenAPI docs
 - Full cascade orchestration (guard stack → optional deep triage → aggregator → policy gate)
 - Multi-model aggregator with weighted voting + fail-closed override
 - NemoClaw YAML policy gate with Discord / Twitch / generic presets
-- Stripe subscription tiers + checkout + webhook + metered usage
+- Stripe subscription tiers + checkout + customer portal + webhook + metered usage
 - Provider registry with 9 clouds; Vast.ai has live API client
 - Docker image + docker-compose for self-hosted
 - `/demo` moderation console with per-model verdicts, reasoning, latency, policy rule, and cost table
 
 **Simulated for the demo:**
 - Other cloud providers return hard-coded catalog data so the cost table is honest
-- Multi-language 119-language live demo (English shown live; cached snapshots for others)
+- Qwen3Guard's model card supports 119 languages; the recording path demonstrates English live
 - Billing/provisioning can run in demo mode when Stripe/Vast credentials are absent
 
 ## On-brief check

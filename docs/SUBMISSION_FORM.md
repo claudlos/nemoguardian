@@ -49,6 +49,7 @@ agent infrastructure product.
 - Free, Pro, Scale, and Self-hosted plans.
 - API-key auth tied to customer tiers.
 - Checkout session creation with demo-mode fallback.
+- Customer portal session creation with demo-mode fallback.
 - Webhook handler for subscription lifecycle events.
 - Metered usage recording for moderation and stream calls.
 - Self-hosted provisioning endpoints gated by plan feature.
@@ -67,7 +68,8 @@ agent infrastructure product.
 
 - Non-Vast providers return static catalog entries unless their integrations are
   expanded later.
-- Stripe checkout and webhooks run in demo mode when Stripe secrets are absent.
+- Stripe checkout, customer portal, and webhooks run in demo mode when Stripe
+  secrets are absent.
 - Billing/provisioning can run without real cloud credentials for local demos.
 - The final video should not be recorded until real-model smoke passes on the
   GPU host.
