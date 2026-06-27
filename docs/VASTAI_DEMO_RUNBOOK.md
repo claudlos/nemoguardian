@@ -94,6 +94,14 @@ docker exec -it <container_id> python scripts/real_model_smoke.py
 docker exec -it <container_id> python scripts/real_model_smoke.py --deep
 ```
 
+The smoke script checks CUDA availability, minimum VRAM, and deep-mode triage
+credentials before loading weights. Override the default 20GB preflight only if
+you are intentionally testing a smaller host:
+
+```bash
+NEMOGUARDIAN_SMOKE_MIN_VRAM_GB=12 python scripts/real_model_smoke.py
+```
+
 If running from a local Python environment on the host instead of Docker:
 
 ```bash

@@ -60,6 +60,7 @@ Required proof before recording:
 - `GET /health` reports `runtime_device` as CUDA/GPU.
 - `GET /health` shows the intended Qwen3Guard and Nemotron model IDs.
 - `triage_configured` is `true` for the deep-mode recording.
+- `scripts/real_model_smoke.py` preflight reports a CUDA device with enough VRAM.
 - Both real-model smoke commands pass:
 
 ```bash

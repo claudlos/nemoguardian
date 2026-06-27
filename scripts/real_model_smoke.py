@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -24,7 +25,23 @@ def main() -> int:
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--deep", action="store_true", help="Also call configured triage API")
+    parser.add_argument(
+        "--min-vram-gb",
+        type=float,
+        default=float(os.environ.get("NEMOGUARDIAN_SMOKE_MIN_VRAM_GB", "20")),
+        help="Minimum CUDA VRAM required before loading weights",
+    )
+    parser.add_argument(
+        "--skip-preflight",
+        action="store_true",
+        help="Skip CUDA/API-key checks and attempt model loading anyway",
+    )
     args = parser.parse_args()
+
+    if not args.skip_preflight:
+        preflight_code = _preflight(deep=args.deep, min_vram_gb=args.min_vram_gb)
+        if preflight_code:
+            return preflight_code
 
     cascade = Cascade(CascadeConfig.from_env())
     policy = get_preset("discord")
@@ -44,6 +61,38 @@ def main() -> int:
     if result.verdict != VerdictLabel.UNSAFE:
         print(f"expected unsafe verdict, got {result.verdict.value}", file=sys.stderr)
         return 3
+    return 0
+
+
+def _preflight(*, deep: bool, min_vram_gb: float) -> int:
+    try:
+        import torch
+    except Exception as exc:
+        print(f"torch import failed before smoke test: {exc}", file=sys.stderr)
+        return 10
+
+    if not torch.cuda.is_available():
+        print("CUDA is not available; run this smoke test on the GPU demo host.", file=sys.stderr)
+        return 11
+
+    props = torch.cuda.get_device_properties(0)
+    total_vram_gb = props.total_memory / (1024 ** 3)
+    print(f"CUDA device: {props.name} ({total_vram_gb:.1f} GB VRAM)", file=sys.stderr)
+    if total_vram_gb < min_vram_gb:
+        print(
+            f"GPU has {total_vram_gb:.1f} GB VRAM; expected at least {min_vram_gb:.1f} GB "
+            "for the real-model demo.",
+            file=sys.stderr,
+        )
+        return 12
+
+    if deep and not (os.environ.get("NVIDIA_API_KEY") or os.environ.get("OPENROUTER_API_KEY")):
+        print(
+            "--deep requires NVIDIA_API_KEY or OPENROUTER_API_KEY for Nemotron triage.",
+            file=sys.stderr,
+        )
+        return 13
+
     return 0
 
 
