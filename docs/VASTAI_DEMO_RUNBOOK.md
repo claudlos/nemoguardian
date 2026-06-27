@@ -50,8 +50,8 @@ NEMOGUARDIAN_TRIAGE_BASE_URL=https://openrouter.ai/api/v1
 ## 3. Build And Run
 
 ```bash
-docker build -t nemoguardian/self-hosted:latest .
-docker run --rm --gpus all --env-file .env -p 8000:8000 nemoguardian/self-hosted:latest
+make docker-build
+make docker-run
 ```
 
 Alternatively with compose:

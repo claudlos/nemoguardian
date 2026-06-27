@@ -78,6 +78,15 @@ curl -X POST 'http://localhost:8000/demo/moderate?policy_preset=discord' \
   }'
 ```
 
+Convenience commands are also available:
+
+```bash
+make verify
+make serve
+make docker-build
+make docker-run
+```
+
 Production API calls use `POST /v1/moderate` with `Authorization: Bearer <nmg_...>`
 so billing and tier limits can run. The `/demo/moderate` endpoint is for the
 hackathon recording path and can be disabled with `NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT=0`.
