@@ -183,12 +183,21 @@ def test_env_api_key_bootstraps_self_hosted_customer(client, monkeypatch):
     assert customer.tier == "self_hosted"
 
 
-def test_placeholder_env_api_key_is_not_accepted(client, monkeypatch):
-    monkeypatch.setenv("NEMOGUARDIAN_API_KEY", "nmg_change_me")
+@pytest.mark.parametrize(
+    "placeholder",
+    [
+        "nmg_change_me",
+        "nmg_default_change_me",
+        "nmg_paste_your_key_here",
+        "nmg_replace_with_demo_key",
+    ],
+)
+def test_placeholder_env_api_key_is_not_accepted(client, monkeypatch, placeholder):
+    monkeypatch.setenv("NEMOGUARDIAN_API_KEY", placeholder)
     r = client.post(
         "/v1/moderate",
         json={"text": "hello", "mode": "fast"},
-        headers={"Authorization": "Bearer nmg_change_me"},
+        headers={"Authorization": f"Bearer {placeholder}"},
     )
     assert r.status_code == 401
 

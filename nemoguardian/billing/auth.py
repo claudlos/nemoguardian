@@ -20,6 +20,7 @@ _PLACEHOLDER_ENV_KEYS = {
     "nmg_change_me",
     "nmg_default_change_me",
     "nmg_paste_your_key_here",
+    "nmg_replace_with_demo_key",
 }
 
 

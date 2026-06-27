@@ -34,8 +34,10 @@ cd nemoguardian
 Create `.env`:
 
 ```bash
-cat > .env <<'ENV'
-NEMOGUARDIAN_API_KEY=nmg_replace_with_demo_key
+DEMO_API_KEY="nmg_demo_$(python -c 'import secrets; print(secrets.token_urlsafe(24))')"
+
+cat > .env <<ENV
+NEMOGUARDIAN_API_KEY=$DEMO_API_KEY
 NEMOGUARDIAN_SELF_HOSTED_EMAIL=self-hosted@nemoguardian.local
 NEMOGUARDIAN_TIER=self_hosted
 NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT=1
@@ -52,6 +54,10 @@ OPENROUTER_API_KEY=
 NEMOGUARDIAN_TRIAGE_BASE_URL=
 ENV
 ```
+
+Do not use `nmg_change_me`, `nmg_default_change_me`,
+`nmg_paste_your_key_here`, or `nmg_replace_with_demo_key`; the server rejects
+those placeholders.
 
 If using OpenRouter only, set:
 
