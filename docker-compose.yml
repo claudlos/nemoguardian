@@ -1,0 +1,42 @@
+# docker-compose.yml for self-hosted nemoguardian
+#
+# Usage:
+#   1. Provision a GPU cloud instance (Vast.ai, DO, Hetzner, your own box)
+#   2. SSH in, install Docker + nvidia-container-toolkit
+#   3. Save your API key from /billing/welcome into .env (below)
+#   4. docker compose up -d
+#   5. curl http://localhost:8000/health
+
+version: "3.9"
+
+x-nemoguardian-env: &nemoguardian-env
+  NEMOGUARDIAN_API_KEY: ${NEMOGUARDIAN_API_KEY:-nmg_change_me}
+  STRIPE_CUSTOMER_ID: ${STRIPE_CUSTOMER_ID:-}
+  NEMOGUARDIAN_TIER: ${NEMOGUARDIAN_TIER:-self_hosted}
+  NEMOGUARDIAN_CASCADE_MODE: ${NEMOGUARDIAN_CASCADE_MODE:-standard}
+  NEMOGUARDIAN_QUANTIZE: ${NEMOGUARDIAN_QUANTIZE:-1}
+
+services:
+  nemoguardian:
+    image: ghcr.io/claudlos/nemoguardian:latest
+    # Or build locally: `docker build -t nemoguardian/self-hosted:latest .`
+    # image: nemoguardian/self-hosted:latest
+    runtime: nvidia
+    ports:
+      - "8000:8000"
+    environment:
+      <<: *nemoguardian-env
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s

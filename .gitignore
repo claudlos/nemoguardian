@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.so
+
+# Virtual envs
+.venv/
+venv/
+
+# Model caches
+models/
+checkpoints/
+*.gguf
+*.safetensors
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+*~

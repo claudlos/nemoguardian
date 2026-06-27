@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>nemoguardian — cost comparison</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #c9d1d9; --text-bright: #f0f6fc; --accent: #58a6ff;
+    --green: #3fb950; --yellow: #d29922; --red: #f85149;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text); padding: 32px;
+    line-height: 1.5;
+  }
+  .container { max-width: 960px; margin: 0 auto; }
+  h1 {
+    font-size: 28px; background: linear-gradient(90deg, #58a6ff, #3fb950);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    margin-bottom: 4px;
+  }
+  .subtitle { color: #8b949e; font-size: 14px; margin-bottom: 32px; }
+
+  .kpi-row {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 12px; margin-bottom: 32px;
+  }
+  .kpi {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px;
+  }
+  .kpi .value { font-size: 22px; font-weight: 700; color: var(--text-bright); }
+  .kpi .label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; }
+
+  .panel {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 24px; margin-bottom: 24px;
+  }
+  .panel h2 { font-size: 18px; margin-bottom: 16px; color: var(--text-bright); }
+
+  .offer-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .offer-table th, .offer-table td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); }
+  .offer-table th { color: #8b949e; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .offer-table tr.recommended { background: rgba(63, 185, 80, 0.06); }
+  .offer-table tr.recommended td:first-child::before {
+    content: "★"; color: var(--green); margin-right: 6px;
+  }
+  .price { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text-bright); }
+  .price-monthly { color: #8b949e; font-size: 12px; }
+  .provider { color: var(--accent); font-weight: 500; }
+  .vram { font-variant-numeric: tabular-nums; }
+  .vram.low { color: var(--red); }
+  .vram.ok  { color: var(--yellow); }
+  .vram.good { color: var(--green); }
+
+  .cta-row {
+    margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);
+    color: #8b949e; font-size: 13px;
+  }
+  .cta-row code {
+    background: #0d1421; padding: 2px 6px; border-radius: 3px; color: var(--text-bright);
+  }
+
+  .footer { text-align: center; color: #6e7681; font-size: 12px; margin-top: 40px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>nemoguardian</h1>
+  <div class="subtitle">Provider-agnostic multi-model LLM moderation. Powered by Nemotron + Qwen3Guard.</div>
+
+  <div class="kpi-row">
+    <div class="kpi"><div class="value">$0.07/hr</div><div class="label">cheapest cascade</div></div>
+    <div class="kpi"><div class="value">9</div><div class="label">GPU clouds</div></div>
+    <div class="kpi"><div class="value">24GB</div><div class="label">min VRAM (FP16)</div></div>
+    <div class="kpi"><div class="value">66+</div><div class="label">providers surveyed</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>Self-hosted GPU options <span style="font-size:13px;color:#8b949e;font-weight:400">— sorted by $/hr, only offers that fit the cascade</span></h2>
+    <table class="offer-table" id="offer-table">
+      <thead>
+        <tr>
+          <th>GPU</th>
+          <th>Provider</th>
+          <th>Region</th>
+          <th>VRAM</th>
+          <th>$/hr</th>
+          <th>$/mo</th>
+        </tr>
+      </thead>
+      <tbody><tr><td colspan="6" style="text-align:center;color:#8b949e;padding:24px">loading offers…</td></tr></tbody>
+    </table>
+    <div class="cta-row">
+      Endpoint: <code>GET /providers/offers</code> · Provision cheapest: <code>POST /billing/provision/cheapest</code>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Why this matters</h2>
+    <p style="margin-bottom:8px">The same nemoguardian Docker image runs on every option above. Customers pick the price/perf trade-off that fits them:</p>
+    <ul style="padding-left:20px;color:#c9d1d9">
+      <li><strong style="color:var(--green)">★ Cheapest:</strong> RTX 3090 at $0.07/hr on Vast.ai — full cascade fits at FP16.</li>
+      <li><strong>Best value:</strong> A100 40GB at $0.14/hr — mature vLLM, reliable for production.</li>
+      <li><strong>EU sovereign:</strong> Hetzner GEX131 at $1.92/hr — dedicated, GDPR.</li>
+      <li><strong>Flagship:</strong> H100 80GB at $0.19/hr — when you need 200 RPS from one node.</li>
+    </ul>
+  </div>
+
+  <div class="footer">nemoguardian · Hermes Agent Accelerated Business Hackathon · NVIDIA × Stripe × Nous Research</div>
+</div>
+
+<script>
+async function load() {
+  try {
+    const r = await fetch('/providers/offers?only_fits=true');
+    const data = await r.json();
+    const tbody = document.querySelector('#offer-table tbody');
+    if (!data.offers || data.offers.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#8b949e">no offers</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.offers.map((o, i) => {
+      const vramCls = o.vram_gb >= 32 ? 'good' : o.vram_gb >= 24 ? 'ok' : 'low';
+      const rowCls = i === 0 ? 'recommended' : '';
+      return `<tr class="${rowCls}">
+        <td>${o.gpu_model}</td>
+        <td class="provider">${o.provider}</td>
+        <td>${o.region}</td>
+        <td class="vram ${vramCls}">${o.vram_gb} GB</td>
+        <td class="price">$${o.price_per_hour_usd.toFixed(2)}</td>
+        <td class="price-monthly">$${o.monthly_price_usd.toFixed(0)}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    document.querySelector('#offer-table tbody').innerHTML =
+      `<tr><td colspan="6" style="color:var(--red)">${e.message}</td></tr>`;
+  }
+}
+load();
+</script>
+</body>
+</html>
