@@ -11,7 +11,7 @@ and tests. It does not load model weights.
 ```bash
 git clone https://github.com/claudlos/nemoguardian
 cd nemoguardian
-python -m venv .venv
+python3 -m venv .venv
 . .venv/bin/activate
 pip install -e ".[dev]"
 make verify

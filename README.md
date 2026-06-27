@@ -64,12 +64,12 @@ explicitly to show the optional triage explanation.
 ## Quickstart
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 . .venv/bin/activate
 pip install -e ".[dev]"
 
 # Start the server. The first moderation call downloads model weights.
-nemoguardian serve --port 8000
+python -m nemoguardian serve --port 8000
 
 # Open the hackathon demo UI.
 open http://localhost:8000/demo

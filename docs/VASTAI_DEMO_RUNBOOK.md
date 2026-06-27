@@ -114,7 +114,7 @@ NEMOGUARDIAN_SMOKE_MIN_VRAM_GB=12 python scripts/real_model_smoke.py
 If running from a local Python environment on the host instead of Docker:
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 . .venv/bin/activate
 pip install -e .
 python scripts/real_model_smoke.py
