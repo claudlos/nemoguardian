@@ -123,6 +123,8 @@ python scripts/real_model_smoke.py --deep  # requires NVIDIA_API_KEY or OPENROUT
 ```
 
 See `docs/VASTAI_DEMO_RUNBOOK.md` for the full GPU host checklist.
+Use `docs/PRE_SUBMIT_CHECKLIST.md` as the final submission gate and
+`docs/VIDEO_SCRIPT.md` for the 60-90 second recording.
 
 ## Modes
 
@@ -203,6 +205,8 @@ nemoguardian/
 ```
 
 ## The submission video plan (60–90 seconds)
+
+See `docs/VIDEO_SCRIPT.md` for the exact shot list and narration.
 
 1. Live demo: type a message into `/demo`
 2. Show the verdict fly out within ~200ms with the per-model breakdown

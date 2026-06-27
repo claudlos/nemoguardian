@@ -7,6 +7,7 @@ import datetime as dt
 import os
 from pathlib import Path
 from typing import Annotated, ClassVar
+from uuid import uuid4
 
 import structlog
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
@@ -190,12 +191,35 @@ async def demo_moderate(
 
 
 @app.post("/v1/moderate/stream")
-async def moderate_stream(request: ModerateRequest) -> StreamingResponse:
+async def moderate_stream(
+    request: ModerateRequest,
+    auth: billing_auth.AuthContext = Depends(billing_auth.require_api_key),
+) -> StreamingResponse:
     """Streaming endpoint — yields per-token verdicts from Qwen3Guard-Stream.
 
     Returns newline-delimited JSON (NDJSON).
     """
+    billing_auth.enforce_feature(auth, "cascade.stream")
+
+    allowed, usage = billing_metered.check_allowance(auth.customer.id)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "monthly allowance exceeded",
+                "tier": auth.plan.tier.value,
+                **usage,
+                "upgrade_url": "/billing/checkout?plan=scale",
+            },
+        )
+
     cascade = get_cascade()
+    request_id = f"stream_{uuid4().hex}"
+    billing_metered.report_usage(
+        auth.customer.id,
+        call_type="stream",
+        request_id=request_id,
+    )
 
     async def gen():
         start = dt.datetime.now()

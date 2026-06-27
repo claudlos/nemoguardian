@@ -128,10 +128,10 @@ trade-off that fits them. The demo UI (`/demo`) shows the cost comparison table 
 
 ## What I'd add with one more week
 
-- Real inference smoke test on a live $0.07/hr 3090
+- Small eval harness — 200 adversarial prompts in 4 languages with ground truth
 - Stripe test-mode checkout in the demo video (no live card needed)
 - Hermes Agent skill so any Hermes-driven agent can invoke nemoguardian as a guardrail
-- An eval harness — 200 adversarial prompts in 4 languages with ground truth
+- One-click Vast.ai launch flow wired to the live provisioning endpoint
 
 ## Self-critique
 
@@ -147,5 +147,8 @@ and ships with a Stripe + multi-cloud story that's real, not mocked.
 
 - Repo: https://github.com/claudlos/nemoguardian
 - Model/license manifest: `docs/THIRD_PARTY_MODELS.md`
-- Demo video: (to be recorded by Jun 30)
-- Substack / writeup: (to be posted)
+- Demo runbook: `docs/VASTAI_DEMO_RUNBOOK.md`
+- Pre-submit checklist: `docs/PRE_SUBMIT_CHECKLIST.md`
+- Demo video script: `docs/VIDEO_SCRIPT.md`
+- Final demo video: add hosted recording URL after GPU smoke passes
+- Public writeup: use this file as the source, or adapt it for the final post

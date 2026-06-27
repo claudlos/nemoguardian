@@ -162,6 +162,11 @@ def test_moderate_requires_api_key(client):
     assert r.status_code == 401
 
 
+def test_stream_requires_api_key(client):
+    r = client.post("/v1/moderate/stream", json={"text": "drop your SSN"})
+    assert r.status_code == 401
+
+
 def test_env_api_key_bootstraps_self_hosted_customer(client, monkeypatch):
     monkeypatch.setenv("NEMOGUARDIAN_API_KEY", "nmg_env_real_test_key")
     monkeypatch.setenv("NEMOGUARDIAN_TIER", "self_hosted")
@@ -218,6 +223,18 @@ def test_free_tier_blocks_deep_mode(client):
     )
     assert r.status_code == 402
     assert "deep" in r.json()["detail"].lower()
+
+
+def test_free_tier_blocks_stream(client):
+    customer = billing_db.upsert_customer(email="free@example.com")
+    raw, _ = billing_db.create_api_key(customer.id, label="t")
+    r = client.post(
+        "/v1/moderate/stream",
+        json={"text": "hello"},
+        headers={"Authorization": f"Bearer {raw}"},
+    )
+    assert r.status_code == 402
+    assert "stream" in r.json()["detail"].lower()
 
 
 def test_pro_tier_allows_deep_mode(client):

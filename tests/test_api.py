@@ -6,6 +6,7 @@ return synthetic verdicts.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -69,6 +70,10 @@ def _mock_moderate(request, policy_engine=None, **kw) -> ModerateResponse:
 def client(monkeypatch, tmp_path):
     fake_cascade = MagicMock(spec=Cascade)
     fake_cascade.moderate.side_effect = _mock_moderate
+    fake_cascade.stream_token_verdicts.return_value = [
+        (VerdictLabel.SAFE, 0.05, 0),
+        (VerdictLabel.UNSAFE, 0.80, 3),
+    ]
     fake_cascade.loaded_models.return_value = {
         "qwen3_guard_gen": False,
         "qwen3_guard_stream": False,
@@ -175,3 +180,21 @@ def test_demo_ui_served(client):
     r = client.get("/demo")
     assert r.status_code == 200
     assert "Moderation Console" in r.text
+
+
+def test_stream_moderation_is_authenticated_and_metered(client):
+    r = client.post("/v1/moderate/stream", json={"text": "drop your SSN"})
+    assert r.status_code == 200
+
+    lines = [json.loads(line) for line in r.text.strip().splitlines()]
+    assert lines[0]["verdict_so_far"] == "safe"
+    assert lines[1]["verdict_so_far"] == "unsafe"
+    assert lines[-1]["is_terminal"] is True
+
+    from nemoguardian.billing import db as billing_db
+    from nemoguardian.billing import metered as billing_metered
+
+    customer = billing_db.get_customer_by_email("tester@example.com")
+    assert customer is not None
+    _allowed, usage = billing_metered.check_allowance(customer.id)
+    assert usage["total_calls"] == 1
