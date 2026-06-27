@@ -22,7 +22,7 @@ def test_demo_host_check_writes_passing_light_evidence(monkeypatch, tmp_path):
                     "qwen_gen_model": "Qwen/Qwen3Guard-Gen-4B",
                     "qwen_stream_model": "Qwen/Qwen3Guard-Stream-0.6B",
                     "nemotron_csr_model": "nvidia/Nemotron-Content-Safety-Reasoning-4B",
-                    "nemotron_triage_model": "nvidia/nemotron-3-ultra-220b-a12b",
+                    "nemotron_triage_model": "nvidia/nemotron-3-ultra-550b-a55b",
                 },
             })
         if path == "/providers/offers":
@@ -86,7 +86,7 @@ def test_demo_host_check_gpu_and_triage_requirements_fail_on_cpu(monkeypatch, tm
                     "qwen_gen_model": "Qwen/Qwen3Guard-Gen-4B",
                     "qwen_stream_model": "Qwen/Qwen3Guard-Stream-0.6B",
                     "nemotron_csr_model": "nvidia/Nemotron-Content-Safety-Reasoning-4B",
-                    "nemotron_triage_model": "nvidia/nemotron-3-ultra-220b-a12b",
+                    "nemotron_triage_model": "nvidia/nemotron-3-ultra-550b-a55b",
                 },
             })
         if path == "/providers/offers":
@@ -134,7 +134,7 @@ def test_demo_host_check_deep_moderation_requires_triage_model(monkeypatch, tmp_
                     "qwen_gen_model": "Qwen/Qwen3Guard-Gen-4B",
                     "qwen_stream_model": "Qwen/Qwen3Guard-Stream-0.6B",
                     "nemotron_csr_model": "nvidia/Nemotron-Content-Safety-Reasoning-4B",
-                    "nemotron_triage_model": "nvidia/nemotron-3-ultra-220b-a12b",
+                    "nemotron_triage_model": "nvidia/nemotron-3-ultra-550b-a55b",
                 },
             })
         if path == "/providers/offers":

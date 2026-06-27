@@ -46,7 +46,7 @@ NEMOGUARDIAN_QUANTIZE=1
 NEMOGUARDIAN_QWEN_MODEL=Qwen/Qwen3Guard-Gen-4B
 NEMOGUARDIAN_QWEN_STREAM_MODEL=Qwen/Qwen3Guard-Stream-0.6B
 NEMOGUARDIAN_CSR_MODEL=nvidia/Nemotron-Content-Safety-Reasoning-4B
-NEMOGUARDIAN_TRIAGE_MODEL=nvidia/nemotron-3-ultra-220b-a12b
+NEMOGUARDIAN_TRIAGE_MODEL=nvidia/nemotron-3-ultra-550b-a55b
 
 # Set one of these.
 NVIDIA_API_KEY=
@@ -63,6 +63,7 @@ If using OpenRouter only, set:
 
 ```bash
 NEMOGUARDIAN_TRIAGE_BASE_URL=https://openrouter.ai/api/v1
+NEMOGUARDIAN_TRIAGE_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
 ```
 
 ## 3. Build And Run

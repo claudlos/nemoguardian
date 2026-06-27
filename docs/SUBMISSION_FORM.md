@@ -39,7 +39,7 @@ agent infrastructure product.
 ## NVIDIA Integration
 
 - `nvidia/Nemotron-Content-Safety-Reasoning-4B` for custom-policy moderation.
-- `nvidia/nemotron-3-ultra-220b-a12b` through NVIDIA/OpenRouter-compatible API
+- `nvidia/nemotron-3-ultra-550b-a55b` through NVIDIA/OpenRouter-compatible API
   for deep-mode disagreement triage.
 - NemoClaw-style YAML policy gate for platform-specific enforcement.
 - CUDA Docker image and GPU readiness checks for the real-model recording path.

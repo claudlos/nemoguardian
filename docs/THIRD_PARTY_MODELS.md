@@ -11,7 +11,7 @@ API calls remain subject to the upstream model providers' licenses and terms.
 | Full-document guard | `Qwen/Qwen3Guard-Gen-4B` | Qwen team | Hugging Face Transformers | Apache 2.0 |
 | Streaming guard | `Qwen/Qwen3Guard-Stream-0.6B` | Qwen team | Hugging Face Transformers | Apache 2.0 |
 | Custom-policy reasoning | `nvidia/Nemotron-Content-Safety-Reasoning-4B` | NVIDIA | Hugging Face Transformers | NVIDIA Open Model License + Gemma Terms of Use |
-| Deep triage | `nvidia/nemotron-3-ultra-220b-a12b` | NVIDIA / OpenRouter | OpenAI-compatible chat API | Provider API terms |
+| Deep triage | `nvidia/nemotron-3-ultra-550b-a55b` | NVIDIA / OpenRouter | OpenAI-compatible chat API | Provider API terms |
 
 ## Source Links
 

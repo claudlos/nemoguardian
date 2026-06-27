@@ -39,7 +39,7 @@ class NemotronTriage:
 
     DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
     OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-    DEFAULT_MODEL = "nvidia/nemotron-3-ultra-220b-a12b"
+    DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
 
     def __init__(
         self,
