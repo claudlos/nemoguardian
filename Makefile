@@ -1,4 +1,4 @@
-.PHONY: install-dev lint test verify serve smoke smoke-deep demo-check pre-submit-local docker-build docker-run
+.PHONY: install-dev lint test verify serve smoke smoke-deep demo-check pre-submit-local final-submission-check docker-build docker-run
 
 PYTHON ?= .venv/bin/python
 PORT ?= 8000
@@ -6,6 +6,7 @@ IMAGE ?= nemoguardian/self-hosted:latest
 DOCKER_BUILD_PROGRESS ?= plain
 DEMO_BASE_URL ?= http://localhost:8000
 DEMO_CHECK_FLAGS ?=
+FINAL_CHECK_FLAGS ?=
 
 install-dev:
 	python3 -m venv --system-site-packages .venv
@@ -34,6 +35,9 @@ demo-check:
 
 pre-submit-local:
 	$(PYTHON) scripts/pre_submit_local.py --image $(IMAGE)
+
+final-submission-check:
+	$(PYTHON) scripts/final_submission_check.py $(FINAL_CHECK_FLAGS)
 
 docker-build:
 	docker build --progress=$(DOCKER_BUILD_PROGRESS) --build-arg NEMOGUARDIAN_SKIP_PREDOWNLOAD=1 -t $(IMAGE) .

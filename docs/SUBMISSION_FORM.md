@@ -89,6 +89,12 @@ make demo-check DEMO_CHECK_FLAGS="--wait-seconds 120 --require-gpu --require-tri
 ```
 
 8. Record using `docs/VIDEO_SCRIPT.md`.
+9. Paste the hosted video URL into this form draft.
+10. Run:
+
+```bash
+make final-submission-check FINAL_CHECK_FLAGS="--video-url https://<hosted-demo-video-url>"
+```
 
 ## Tags
 

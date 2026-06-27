@@ -100,6 +100,13 @@ Before recording:
 
 ## 6. Submission Links
 
+After `demo-evidence.json` and the hosted video URL exist, paste the final video
+URL into `docs/SUBMISSION_FORM.md` and run:
+
+```bash
+make final-submission-check FINAL_CHECK_FLAGS="--video-url https://<hosted-demo-video-url>"
+```
+
 Submit these:
 
 - Repository: https://github.com/claudlos/nemoguardian

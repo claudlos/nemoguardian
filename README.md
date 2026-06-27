@@ -141,6 +141,12 @@ After the GPU service is running, capture a submission evidence file with:
 make demo-check DEMO_CHECK_FLAGS="--wait-seconds 120 --require-gpu --require-triage --moderate --deep --output demo-evidence.json"
 ```
 
+After the hosted video URL is pasted into `docs/SUBMISSION_FORM.md`, run:
+
+```bash
+make final-submission-check FINAL_CHECK_FLAGS="--video-url https://<hosted-demo-video-url>"
+```
+
 ## Modes
 
 - `fast` — Qwen3Guard-Stream only. Streaming token-level. ~1ms latency.

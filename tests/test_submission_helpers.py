@@ -6,7 +6,7 @@ import json
 import sys
 from types import SimpleNamespace
 
-from scripts import demo_host_check, pre_submit_local, real_model_smoke
+from scripts import demo_host_check, final_submission_check, pre_submit_local, real_model_smoke
 
 
 def test_demo_host_check_writes_passing_light_evidence(monkeypatch, tmp_path):
@@ -289,6 +289,106 @@ def test_pre_submit_local_stops_container_after_light_check_failure(monkeypatch,
     assert commands[-1] == ["docker", "stop", "nmg-test"]
 
 
+def test_final_submission_check_accepts_complete_artifacts(monkeypatch, tmp_path):
+    video_url = "https://videos.example/nemoguardian-demo"
+    local_summary = _write_json(
+        tmp_path / "local-summary.json",
+        _local_summary(commit="abc123", passed=True),
+    )
+    gpu_evidence = _write_json(
+        tmp_path / "demo-evidence.json",
+        _gpu_evidence(commit="abc123", passed=True),
+    )
+    form = tmp_path / "SUBMISSION_FORM.md"
+    form.write_text(
+        f"# Form\n\nhttps://github.com/claudlos/nemoguardian\n\nDemo Video\n\n{video_url}\n"
+    )
+    monkeypatch.setattr(final_submission_check, "ROOT", tmp_path)
+    for relative in [
+        "LICENSE",
+        "NOTICE",
+        "README.md",
+        "SUBMISSION.md",
+        "docs/THIRD_PARTY_MODELS.md",
+        "docs/MODEL_CATALOG.md",
+        "docs/JUDGE_GUIDE.md",
+        "docs/VASTAI_DEMO_RUNBOOK.md",
+        "docs/VIDEO_SCRIPT.md",
+    ]:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("ok\n")
+
+    result = final_submission_check.run_final_checks(
+        gpu_evidence_path=gpu_evidence,
+        local_summary_path=local_summary,
+        submission_form_path=form,
+        video_url=video_url,
+        expected_commit="abc123",
+    )
+
+    assert result["passed"] is True
+    assert {check["name"] for check in result["checks"]} == {
+        "required_files",
+        "video_url",
+        "submission_form",
+        "local_pre_submit_summary",
+        "gpu_evidence",
+    }
+
+
+def test_final_submission_check_rejects_lightweight_gpu_evidence(monkeypatch, tmp_path):
+    video_url = "https://videos.example/nemoguardian-demo"
+    local_summary = _write_json(tmp_path / "local-summary.json", _local_summary())
+    gpu_evidence = _write_json(
+        tmp_path / "demo-evidence.json",
+        _gpu_evidence(
+            requirements={
+                "require_gpu": False,
+                "require_triage": False,
+                "moderate": False,
+                "deep": False,
+            }
+        ),
+    )
+    form = tmp_path / "SUBMISSION_FORM.md"
+    form.write_text(f"https://github.com/claudlos/nemoguardian\n{video_url}\n")
+    monkeypatch.setattr(final_submission_check, "ROOT", tmp_path)
+
+    result = final_submission_check.run_final_checks(
+        gpu_evidence_path=gpu_evidence,
+        local_summary_path=local_summary,
+        submission_form_path=form,
+        video_url=video_url,
+        expected_commit="abc123",
+    )
+
+    assert result["passed"] is False
+    gpu_check = next(check for check in result["checks"] if check["name"] == "gpu_evidence")
+    assert gpu_check["ok"] is False
+    assert "'require_gpu': False" in gpu_check["detail"]
+
+
+def test_final_submission_check_rejects_placeholder_video(monkeypatch, tmp_path):
+    local_summary = _write_json(tmp_path / "local-summary.json", _local_summary())
+    gpu_evidence = _write_json(tmp_path / "demo-evidence.json", _gpu_evidence())
+    form = tmp_path / "SUBMISSION_FORM.md"
+    form.write_text("https://github.com/claudlos/nemoguardian\nTBD\n")
+    monkeypatch.setattr(final_submission_check, "ROOT", tmp_path)
+
+    result = final_submission_check.run_final_checks(
+        gpu_evidence_path=gpu_evidence,
+        local_summary_path=local_summary,
+        submission_form_path=form,
+        video_url="TBD",
+        expected_commit="abc123",
+    )
+
+    assert result["passed"] is False
+    failures = {check["name"] for check in result["checks"] if not check["ok"]}
+    assert {"video_url", "submission_form"} <= failures
+
+
 def test_real_model_smoke_preflight_rejects_missing_cuda(monkeypatch):
     fake_torch = SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False))
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
@@ -336,3 +436,40 @@ def test_real_model_smoke_preflight_accepts_deep_gpu_with_key(monkeypatch):
     monkeypatch.setenv("NVIDIA_API_KEY", "set-but-not-real")
 
     assert real_model_smoke._preflight(deep=True, min_vram_gb=20) == 0
+
+
+def _write_json(path, data):
+    path.write_text(json.dumps(data))
+    return path
+
+
+def _local_summary(*, commit="abc123", passed=True):
+    return {
+        "tool": "pre_submit_local",
+        "passed": passed,
+        "repo": {"short_commit": commit},
+        "checks": [
+            {"name": "python_verify", "ok": True},
+            {"name": "docker_build", "ok": True},
+            {"name": "image_license_files", "ok": True},
+            {"name": "container_light_demo_check", "ok": True},
+        ],
+    }
+
+
+def _gpu_evidence(*, commit="abc123", passed=True, requirements=None):
+    return {
+        "tool": "demo_host_check",
+        "passed": passed,
+        "repo": {"short_commit": commit, "dirty": False},
+        "requirements": requirements or {
+            "require_gpu": True,
+            "require_triage": True,
+            "moderate": True,
+            "deep": True,
+        },
+        "checks": [
+            {"name": name, "ok": True}
+            for name in sorted(final_submission_check.REQUIRED_GPU_CHECKS)
+        ],
+    }

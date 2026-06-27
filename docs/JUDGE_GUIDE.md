@@ -126,3 +126,10 @@ Demo-mode or static:
 - Evidence file: `demo-evidence.json` from the GPU host.
 - Writeup source: `SUBMISSION.md`.
 - Form draft: `docs/SUBMISSION_FORM.md`.
+
+Once the final video URL is pasted into `docs/SUBMISSION_FORM.md`, this command
+checks the final evidence bundle:
+
+```bash
+make final-submission-check FINAL_CHECK_FLAGS="--video-url https://<hosted-demo-video-url>"
+```
