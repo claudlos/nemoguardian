@@ -78,7 +78,7 @@ agent infrastructure product.
 
 1. Review `docs/JUDGE_GUIDE.md`.
 2. Follow `docs/VASTAI_DEMO_RUNBOOK.md`.
-3. Run `make verify` and `make docker-build`.
+3. Run `make pre-submit-local`.
 4. Start the GPU host with Docker or compose.
 5. Run `docker compose exec nemoguardian python scripts/real_model_smoke.py`.
 6. Run `docker compose exec nemoguardian python scripts/real_model_smoke.py --deep`.

@@ -64,6 +64,13 @@ Expected:
 - `/providers/offers` includes a fitting low-cost GPU.
 - `/v1/moderate/stream` rejects unauthenticated requests.
 
+To run the full local non-GPU gate, including Docker build, image license-file
+checks, container boot, and the same lightweight host check:
+
+```bash
+make pre-submit-local
+```
+
 ## 3. Real GPU Verification
 
 Use this path for the final scored demo. It requires a CUDA host with enough

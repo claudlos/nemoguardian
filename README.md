@@ -88,6 +88,7 @@ Convenience commands are also available:
 
 ```bash
 make verify
+make pre-submit-local
 make serve
 make docker-build
 make docker-run

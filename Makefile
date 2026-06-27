@@ -1,4 +1,4 @@
-.PHONY: install-dev lint test verify serve smoke smoke-deep demo-check docker-build docker-run
+.PHONY: install-dev lint test verify serve smoke smoke-deep demo-check pre-submit-local docker-build docker-run
 
 PYTHON ?= .venv/bin/python
 PORT ?= 8000
@@ -31,6 +31,9 @@ smoke-deep:
 
 demo-check:
 	$(PYTHON) scripts/demo_host_check.py --base-url $(DEMO_BASE_URL) $(DEMO_CHECK_FLAGS)
+
+pre-submit-local:
+	$(PYTHON) scripts/pre_submit_local.py --image $(IMAGE)
 
 docker-build:
 	docker build --progress=$(DOCKER_BUILD_PROGRESS) --build-arg NEMOGUARDIAN_SKIP_PREDOWNLOAD=1 -t $(IMAGE) .

@@ -30,8 +30,7 @@ gh run list --workflow ci.yml --limit 1
 Run these from the repo root:
 
 ```bash
-make verify
-make docker-build
+make pre-submit-local
 ```
 
 Expected:
@@ -39,6 +38,10 @@ Expected:
 - Ruff passes.
 - Pytest passes.
 - Docker image builds as `nemoguardian/self-hosted:latest`.
+- The image includes license and model-term documents.
+- The built image boots and passes the lightweight demo host check.
+- `build/local-pre-submit-summary.json` and
+  `build/docker-demo-evidence-light.json` are written.
 
 ## 3. License And Model Terms
 
@@ -49,7 +52,8 @@ Confirm these files are present in the repo and Docker image:
 - `docs/THIRD_PARTY_MODELS.md`
 - `docs/MODEL_CATALOG.md`
 
-Run:
+`make pre-submit-local` already checks these inside the Docker image. To rerun
+only the image assertion:
 
 ```bash
 docker run --rm --entrypoint sh nemoguardian/self-hosted:latest \

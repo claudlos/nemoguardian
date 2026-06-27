@@ -6,7 +6,7 @@ import json
 import sys
 from types import SimpleNamespace
 
-from scripts import demo_host_check, real_model_smoke
+from scripts import demo_host_check, pre_submit_local, real_model_smoke
 
 
 def test_demo_host_check_writes_passing_light_evidence(monkeypatch, tmp_path):
@@ -180,6 +180,113 @@ def test_demo_host_check_deep_moderation_requires_triage_model(monkeypatch, tmp_
     assert evidence["requirements"]["deep"] is True
     failed = {check["name"] for check in evidence["checks"] if not check["ok"]}
     assert failed == {"deep_triage_result"}
+
+
+def test_pre_submit_local_runs_expected_gate(monkeypatch, tmp_path):
+    commands: list[list[str]] = []
+
+    def runner(cmd):
+        commands.append(list(cmd))
+        return 0
+
+    monkeypatch.setattr(
+        pre_submit_local,
+        "_repo_metadata",
+        lambda: {"branch": "main", "commit": "abc", "short_commit": "abc", "dirty": False},
+    )
+    summary = pre_submit_local.run_local_checks(
+        image="test/image:latest",
+        container_name="nmg-test",
+        port=0,
+        wait_seconds=5,
+        output_dir=tmp_path,
+        command_runner=runner,
+        port_picker=lambda: 8123,
+    )
+
+    assert summary["passed"] is True
+    assert summary["base_url"] == "http://localhost:8123"
+    assert summary["artifacts"]["light_evidence"] == str(
+        tmp_path.resolve() / "docker-demo-evidence-light.json"
+    )
+    assert [check["name"] for check in summary["checks"]] == [
+        "python_verify",
+        "docker_build",
+        "image_license_files",
+        "container_start",
+        "container_light_demo_check",
+        "container_stop",
+    ]
+    assert commands[0] == ["make", "verify"]
+    assert commands[1] == ["make", "docker-build", "IMAGE=test/image:latest"]
+    assert commands[2][:5] == ["docker", "run", "--rm", "--entrypoint", "sh"]
+    assert commands[3][:6] == ["docker", "run", "--rm", "-d", "--name", "nmg-test"]
+    assert commands[4][1:] == [
+        "scripts/demo_host_check.py",
+        "--base-url",
+        "http://localhost:8123",
+        "--wait-seconds",
+        "5",
+        "--output",
+        str(tmp_path.resolve() / "docker-demo-evidence-light.json"),
+    ]
+    assert commands[5] == ["docker", "stop", "nmg-test"]
+
+
+def test_pre_submit_local_skips_docker_dependents_after_build_failure(monkeypatch, tmp_path):
+    commands: list[list[str]] = []
+
+    def runner(cmd):
+        commands.append(list(cmd))
+        if list(cmd)[:2] == ["make", "docker-build"]:
+            return 2
+        return 0
+
+    monkeypatch.setattr(pre_submit_local, "_repo_metadata", lambda: {})
+    summary = pre_submit_local.run_local_checks(
+        image="test/image:latest",
+        container_name="nmg-test",
+        port=8123,
+        wait_seconds=5,
+        output_dir=tmp_path,
+        command_runner=runner,
+    )
+
+    assert summary["passed"] is False
+    assert [check["name"] for check in summary["checks"]] == [
+        "python_verify",
+        "docker_build",
+        "image_license_files",
+        "container_light_demo_check",
+    ]
+    assert all(command[0] != "docker" for command in commands)
+
+
+def test_pre_submit_local_stops_container_after_light_check_failure(monkeypatch, tmp_path):
+    commands: list[list[str]] = []
+
+    def runner(cmd):
+        command = list(cmd)
+        commands.append(command)
+        if "scripts/demo_host_check.py" in command:
+            return 7
+        return 0
+
+    monkeypatch.setattr(pre_submit_local, "_repo_metadata", lambda: {})
+    summary = pre_submit_local.run_local_checks(
+        image="test/image:latest",
+        container_name="nmg-test",
+        port=8123,
+        wait_seconds=5,
+        output_dir=tmp_path,
+        command_runner=runner,
+    )
+
+    assert summary["passed"] is False
+    assert summary["checks"][-2]["name"] == "container_light_demo_check"
+    assert summary["checks"][-2]["ok"] is False
+    assert summary["checks"][-1]["name"] == "container_stop"
+    assert commands[-1] == ["docker", "stop", "nmg-test"]
 
 
 def test_real_model_smoke_preflight_rejects_missing_cuda(monkeypatch):
