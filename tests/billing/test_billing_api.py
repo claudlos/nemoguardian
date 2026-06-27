@@ -160,6 +160,47 @@ def test_webhook_checkout_completed_upgrades_tier(client, monkeypatch):
     assert upgraded.stripe_customer_id == "cus_test_X"
 
 
+def test_webhook_idempotent_on_event_id(client, monkeypatch):
+    """A replayed event (same id) must not mint a second welcome key."""
+    client.post("/billing/checkout", json={"email": "dup@example.com", "tier": "free"})
+    customer = billing_db.get_customer_by_email("dup@example.com")
+
+    payload = {
+        "id": "evt_test_replay",
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "cs_test_1",
+                "customer": "cus_dup",
+                "customer_email": "dup@example.com",
+                "subscription": "sub_dup",
+                "created": 1717200000,
+                "expires_at": 1719792000,
+                "metadata": {
+                    "nemoguardian_customer_id": str(customer.id),
+                    "nemoguardian_tier": "pro",
+                },
+            }
+        },
+    }
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
+    body, signature = _signed_payload(payload, "whsec_test")
+    headers = {"Stripe-Signature": signature, "Content-Type": "application/json"}
+
+    # First delivery: handled, provisions exactly one key.
+    r1 = client.post("/billing/webhook", content=body, headers=headers)
+    assert r1.status_code == 200
+    assert r1.json().get("duplicate") is not True
+    keys_before = billing_db.list_api_keys(customer.id)
+
+    # Replay: same event id → marked duplicate, no new key.
+    r2 = client.post("/billing/webhook", content=body, headers=headers)
+    assert r2.status_code == 200
+    assert r2.json().get("duplicate") is True
+    keys_after = billing_db.list_api_keys(customer.id)
+    assert len(keys_after) == len(keys_before), "replay must not mint a duplicate key"
+
+
 def test_webhook_signature_required_when_secret_missing(client):
     payload = {"type": "checkout.session.completed", "data": {"object": {}}}
     r = client.post("/billing/webhook", json=payload)
@@ -353,6 +394,57 @@ def test_usage_endpoint_returns_allowance(client):
     body = r.json()
     assert body["allowance"] == 1_000
     assert body["tier"] == "free"
+
+
+def _self_hosted_key(client, email):
+    customer = billing_db.upsert_customer(email=email)
+    billing_db.set_customer_tier(customer.id, Tier.SELF_HOSTED)
+    raw, _ = billing_db.create_api_key(customer.id)
+    return raw
+
+
+_VALID_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIabcdefghijklmnopqrstuvwxyz0124 me@host"
+
+
+def test_provision_rejects_malformed_ssh_key(client):
+    raw = _self_hosted_key(client, "ssh-bad@example.com")
+    r = client.post(
+        "/billing/provision",
+        json={"provider": "on_prem", "ssh_public_key": "not-a-real-key"},
+        headers={"Authorization": f"Bearer {raw}"},
+    )
+    assert r.status_code == 400
+    assert "ssh_public_key" in r.json()["detail"]
+
+
+def test_provision_rejects_shell_metachar_in_ssh_key(client):
+    raw = _self_hosted_key(client, "ssh-meta@example.com")
+    r = client.post(
+        "/billing/provision",
+        json={"provider": "on_prem", "ssh_public_key": "ssh-ed25519 AAAA'injected"},
+        headers={"Authorization": f"Bearer {raw}"},
+    )
+    assert r.status_code == 400
+
+
+def test_provision_accepts_valid_ssh_key_and_renders_heredoc(client):
+    raw = _self_hosted_key(client, "ssh-good@example.com")
+    r = client.post(
+        "/billing/provision",
+        json={"provider": "on_prem", "ssh_public_key": _VALID_KEY},
+        headers={"Authorization": f"Bearer {raw}"},
+    )
+    assert r.status_code == 200, r.text
+
+    # The snippet is rendered by a background task, so assert on the renderer
+    # directly rather than racing the job row. Verify heredoc form, key verbatim,
+    # and that the old echo-with-quotes form is gone.
+    from nemoguardian.billing import provisioning
+
+    snippet = provisioning._render_onprem_snippet(_VALID_KEY)
+    assert "NEMOGUARDIAN_EOF" in snippet
+    assert "echo '" not in snippet
+    assert _VALID_KEY in snippet
 
 
 def _signed_payload(payload: dict, secret: str, *, timestamp: int | None = None) -> tuple[bytes, str]:

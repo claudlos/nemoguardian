@@ -99,7 +99,14 @@ async def handle_stripe_webhook(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=f"invalid JSON: {exc}") from exc
 
     event_type = event.get("type", "")
+    event_id = event.get("id", "")
     data = event.get("data", {}).get("object", {})
+
+    # Idempotency: skip events already processed. A replayed-but-fresh event
+    # still passes signature/tolerance checks, so we key on Stripe's event id to
+    # avoid duplicate side effects (e.g. a second welcome API key).
+    if not db.claim_webhook_event(event_id, event_type=event_type):
+        return {"received": True, "type": event_type, "duplicate": True}
 
     handler = _HANDLERS.get(event_type)
     result = handler(data) if handler is not None else {"ignored": True, "type": event_type}

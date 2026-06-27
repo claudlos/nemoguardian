@@ -84,6 +84,15 @@ CREATE TABLE IF NOT EXISTS provisioning_jobs (
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS webhook_events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id        TEXT UNIQUE NOT NULL,
+    event_type      TEXT,
+    received_at     TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_events_id ON webhook_events(event_id);
 """
 
 
@@ -120,6 +129,25 @@ def _tx(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def claim_webhook_event(event_id: str, *, event_type: str | None = None) -> bool:
+    """Record a Stripe event id; return True if new, False if a duplicate.
+
+    Makes webhook handling idempotent: a replayed-but-still-fresh event (which
+    passes signature/tolerance checks) is detected here and skipped so it cannot
+    mint a second welcome API key or otherwise double-apply. Empty event ids are
+    treated as non-deduplicable (returns True) since there is nothing to key on.
+    """
+    if not event_id:
+        return True
+    conn = init_db()
+    with _tx(conn):
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO webhook_events (event_id, event_type, received_at) VALUES (?, ?, ?)",
+            (event_id, event_type, _now()),
+        )
+        return cur.rowcount == 1
 
 
 def _hash_key(raw: str) -> str:
@@ -280,8 +308,11 @@ def revoke_api_key(customer_id: int, key_id: int) -> None:
 
 def list_api_keys(customer_id: int) -> list[ApiKey]:
     conn = init_db()
+    # Name the columns explicitly so the row maps 1:1 onto the ApiKey dataclass
+    # (which deliberately omits key_hash — keys are hash-only at rest).
     rows = conn.execute(
-        "SELECT * FROM api_keys WHERE customer_id = ? ORDER BY id DESC",
+        """SELECT id, customer_id, label, created_at, last_used_at, revoked
+           FROM api_keys WHERE customer_id = ? ORDER BY id DESC""",
         (customer_id,),
     ).fetchall()
     return [ApiKey(**dict(r)) for r in rows]
@@ -487,6 +518,7 @@ __all__ = [
     "ProvisioningJob",
     "Subscription",
     "UsageSummary",
+    "claim_webhook_event",
     "create_api_key",
     "create_provisioning_job",
     "get_customer",
