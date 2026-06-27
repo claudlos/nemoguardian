@@ -81,7 +81,7 @@ trade-off that fits them. The demo UI (`/demo`) shows the cost comparison table 
 ## What's real vs. simulated for the demo
 
 **Real, shipping:**
-- The FastAPI server with 19 endpoints
+- The FastAPI server with 16 application endpoints plus generated OpenAPI docs
 - Full cascade orchestration (guard stack → optional deep triage → aggregator → policy gate)
 - Multi-model aggregator with weighted voting + fail-closed override
 - NemoClaw YAML policy gate with Discord / Twitch / generic presets
