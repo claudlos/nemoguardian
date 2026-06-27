@@ -109,7 +109,15 @@ def init_db(path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
         if _conn is None:
             _conn = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
             _conn.row_factory = sqlite3.Row
-            _conn.executescript("PRAGMA foreign_keys = ON;")
+            # WAL mode tolerates concurrent readers while a write commits, and
+            # busy_timeout makes writers wait briefly instead of erroring under
+            # contention. Foreign keys stay on. Together these make the single
+            # shared connection safer if workers or threads ever overlap writes.
+            _conn.executescript(
+                "PRAGMA foreign_keys = ON;"
+                "PRAGMA journal_mode = WAL;"
+                "PRAGMA busy_timeout = 5000;"
+            )
             _conn.executescript(SCHEMA)
         return _conn
 

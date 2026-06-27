@@ -176,8 +176,7 @@ async def moderate(
     try:
         result = await asyncio.to_thread(cascade.moderate, request, policy_engine=policy_engine)
     except Exception as exc:
-        logger.exception("moderation_failed", error=str(exc))
-        raise HTTPException(500, f"moderation failed: {exc}") from exc
+        raise _client_error(500, what="moderation_failed", exc=exc) from exc
 
     billing_metered.report_usage(
         auth.customer.id,
@@ -208,8 +207,7 @@ async def demo_moderate(
     try:
         return await asyncio.to_thread(cascade.moderate, request, policy_engine=policy_engine)
     except Exception as exc:
-        logger.exception("demo_moderation_failed", error=str(exc))
-        raise HTTPException(500, f"demo moderation failed: {exc}") from exc
+        raise _client_error(500, what="demo_moderation_failed", exc=exc) from exc
 
 
 @app.post("/v1/moderate/stream")
@@ -309,6 +307,21 @@ def _demo_endpoint_enabled() -> bool:
         "yes",
         "on",
     }
+
+
+def _client_error(status_code: int, *, what: str, exc: BaseException) -> HTTPException:
+    """Log the full exception server-side and return a generic client error.
+
+    Raw exception text can leak filesystem paths, HF repo ids, CUDA errors, or
+    provider payloads. We keep those in the logs (via logger.exception) and hand
+    the caller a stable message plus a correlation id they can quote in a report.
+    """
+    correlation = uuid4().hex[:12]
+    logger.exception(what, error=str(exc), correlation=correlation)
+    return HTTPException(
+        status_code,
+        detail={"error": what, "correlation_id": correlation},
+    )
 
 
 __all__ = ["app"]
@@ -534,7 +547,7 @@ async def billing_provision_cheapest(
             max_price_usd=max_price_usd,
         )
     except Exception as exc:
-        raise HTTPException(502, f"provisioning failed: {exc}") from exc
+        raise _client_error(502, what="provisioning_failed", exc=exc) from exc
 
     # Persist the job so the customer can poll status.
     provider_enum = ProviderName(offer.provider.value)
@@ -604,7 +617,7 @@ async def billing_provision_specific(
             env=env,
         )
     except ProvisionError as exc:
-        raise HTTPException(502, f"{provider_name} provisioning failed: {exc}") from exc
+        raise _client_error(502, what=f"{provider_name}_provisioning_failed", exc=exc) from exc
 
     job = billing_db.create_provisioning_job(
         customer_id=auth.customer.id, tier=auth.plan.tier, provider=provider_name,
