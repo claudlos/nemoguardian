@@ -167,6 +167,9 @@ async def test_discord_build_bot_registers_slash_commands():
             "log_channel",
             "dry_run",
             "timeout",
+            "ignore_channel",
+            "ignore_role",
+            "exempt_user",
             "case",
             "history",
             "test",
@@ -199,6 +202,30 @@ async def test_discord_adapter_ignores_bot_messages(tmp_path):
 
     assert cascade.calls == []
     assert message.deleted is False
+
+
+async def test_discord_adapter_skips_configured_exclusions(tmp_path):
+    scenarios = [
+        ("ignored_channel_ids", "456", lambda message: None),
+        ("ignored_role_ids", "111", lambda message: message.author.roles.append(SimpleNamespace(id=111))),
+        ("exempt_user_ids", "42", lambda message: None),
+    ]
+
+    for index, (field, value, prepare_message) in enumerate(scenarios):
+        config_store = ConfigStore(tmp_path / f"bot-config-{index}.json")
+        audit_log = AuditLog(tmp_path / f"bot-audit-{index}.jsonl")
+        config = BotConfig.default(Platform.DISCORD, "123")
+        getattr(config, field).add(value)
+        config_store.save(config)
+        cascade = FakeCascade(VerdictLabel.UNSAFE)
+        message = FakeDiscordMessage("drop your SSN")
+        prepare_message(message)
+
+        await discord.make_handler(cascade, config_store=config_store, audit_log=audit_log)(message)
+
+        assert cascade.calls == []
+        assert message.deleted is False
+        assert audit_log.recent() == []
 
 
 async def test_twitch_adapter_returns_delete_action(tmp_path):
@@ -293,6 +320,19 @@ def test_discord_doctor_text_reports_readiness_gaps():
     assert "Send Messages" in text
     assert "Manage Messages" in text
     assert "Moderate Members" in text
+
+
+def test_discord_status_text_includes_exclusion_controls():
+    config = BotConfig.default(Platform.DISCORD, "123")
+    config.ignored_channel_ids.add("456")
+    config.ignored_role_ids.add("111")
+    config.exempt_user_ids.add("42")
+
+    text = discord._status_text(config)
+
+    assert "ignored channels: `456`" in text
+    assert "ignored roles: `111`" in text
+    assert "exempt users: `42`" in text
 
 
 def test_discord_case_and_history_text_helpers():

@@ -13,8 +13,8 @@ moderation work:
 - react to controversial messages
 - write a mod-log case
 - append a private audit record
-- expose slash commands for setup, policy, mode, dry-run, timeout, diagnostics,
-  case lookup, history, and test checks
+- expose slash commands for setup, policy, mode, dry-run, timeout, ignore/exempt
+  scopes, diagnostics, case lookup, history, and test checks
 
 ## Discord App Setup
 
@@ -89,6 +89,9 @@ Use these in a test server first:
 /nemoguardian policy "block PII, scams, harassment, slurs, and threats"
 /nemoguardian dry_run enabled:true
 /nemoguardian timeout enabled:true seconds:600
+/nemoguardian ignore_channel channel:#off-topic ignored:true
+/nemoguardian ignore_role role:@mods ignored:true
+/nemoguardian exempt_user user:@trusted-member exempt:true
 /nemoguardian test text:"Hey @everyone, drop your SSN for $100"
 /nemoguardian history limit:5
 /nemoguardian case case_id:discord-<guild-id>-<message-id>
@@ -102,6 +105,15 @@ server. It checks the current guild config, mod-log channel, requested Message
 Content intent, and the bot's effective channel permissions. `/nemoguardian
 history` and `/nemoguardian case` give moderators a quick way to inspect recent
 decisions without reading the JSONL audit file directly.
+
+Use the ignore/exempt commands to keep moderation noise down in trusted or
+irrelevant scopes:
+
+- `/nemoguardian ignore_channel ... ignored:true` skips a channel
+- `/nemoguardian ignore_role ... ignored:true` skips users with a role
+- `/nemoguardian exempt_user ... exempt:true` skips one user
+
+Pass `ignored:false` or `exempt:false` to remove an exclusion.
 
 ## Runtime Behavior
 

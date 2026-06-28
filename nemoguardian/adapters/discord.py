@@ -276,6 +276,36 @@ def build_bot():
         config_store.save(config)
         await interaction.response.send_message(_status_text(config), ephemeral=True)
 
+    @group.command(name="ignore_channel", description="Exclude or include a channel in moderation.")
+    @app_commands.default_permissions(manage_guild=True)
+    async def ignore_channel(interaction, channel: discord.TextChannel, ignored: bool = True) -> None:
+        if not await _require_manage_guild(interaction):
+            return
+        config = config_store.get(Platform.DISCORD, str(interaction.guild_id))
+        _toggle_id(config.ignored_channel_ids, str(channel.id), enabled=ignored)
+        config_store.save(config)
+        await interaction.response.send_message(_status_text(config), ephemeral=True)
+
+    @group.command(name="ignore_role", description="Exclude or include a role in moderation.")
+    @app_commands.default_permissions(manage_guild=True)
+    async def ignore_role(interaction, role: discord.Role, ignored: bool = True) -> None:
+        if not await _require_manage_guild(interaction):
+            return
+        config = config_store.get(Platform.DISCORD, str(interaction.guild_id))
+        _toggle_id(config.ignored_role_ids, str(role.id), enabled=ignored)
+        config_store.save(config)
+        await interaction.response.send_message(_status_text(config), ephemeral=True)
+
+    @group.command(name="exempt_user", description="Exclude or include a user in moderation.")
+    @app_commands.default_permissions(manage_guild=True)
+    async def exempt_user(interaction, user: discord.Member, exempt: bool = True) -> None:
+        if not await _require_manage_guild(interaction):
+            return
+        config = config_store.get(Platform.DISCORD, str(interaction.guild_id))
+        _toggle_id(config.exempt_user_ids, str(user.id), enabled=exempt)
+        config_store.save(config)
+        await interaction.response.send_message(_status_text(config), ephemeral=True)
+
     @group.command(name="case", description="Look up a moderation case by case ID.")
     @app_commands.default_permissions(manage_guild=True)
     async def case_lookup(interaction, case_id: str) -> None:
@@ -433,8 +463,22 @@ def _status_text(config: BotConfig) -> str:
         f"dry run: `{config.dry_run}`\n"
         f"delete unsafe: `{config.delete_unsafe}` timeout unsafe: `{config.timeout_unsafe}` "
         f"({config.timeout_seconds}s)\n"
+        f"ignored channels: `{_format_ids(config.ignored_channel_ids)}`\n"
+        f"ignored roles: `{_format_ids(config.ignored_role_ids)}`\n"
+        f"exempt users: `{_format_ids(config.exempt_user_ids)}`\n"
         f"policy: {config.policy_text}"
     )
+
+
+def _toggle_id(values: set[str], value: str, *, enabled: bool) -> None:
+    if enabled:
+        values.add(value)
+    else:
+        values.discard(value)
+
+
+def _format_ids(values: set[str]) -> str:
+    return ", ".join(sorted(values)) if values else "none"
 
 
 def _doctor_text(config: BotConfig, permissions: Any, *, message_content_enabled: bool) -> str:

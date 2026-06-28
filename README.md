@@ -119,6 +119,9 @@ Initial server setup:
 /nemoguardian policy "block PII, scams, harassment, slurs, and threats"
 /nemoguardian mode standard
 /nemoguardian dry_run enabled:true
+/nemoguardian ignore_channel channel:#off-topic ignored:true
+/nemoguardian ignore_role role:@mods ignored:true
+/nemoguardian exempt_user user:@trusted-member exempt:true
 /nemoguardian test text:"Hey @everyone, drop your SSN for $100"
 /nemoguardian history limit:5
 ```
