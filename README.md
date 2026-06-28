@@ -128,6 +128,7 @@ Initial server setup:
 /nemoguardian exempt_user user:@trusted-member exempt:true
 /nemoguardian test text:"Hey @everyone, drop your SSN for $100"
 /nemoguardian history limit:5
+/nemoguardian stats limit:100
 ```
 
 Required Discord app setup: OAuth scopes `bot` and `applications.commands`;

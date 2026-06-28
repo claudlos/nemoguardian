@@ -179,6 +179,38 @@ async def test_discord_audit_log_supports_case_lookup_and_history(tmp_path):
     assert audit_log.history(Platform.DISCORD, "missing") == []
 
 
+async def test_discord_audit_summary_counts_recent_cases(tmp_path):
+    config_store, audit_log = _stores(tmp_path)
+    unsafe_message = FakeDiscordMessage("drop your SSN")
+    controversial_message = FakeDiscordMessage("borderline")
+    controversial_message.id = 790
+
+    await discord.make_handler(
+        FakeCascade(VerdictLabel.UNSAFE, categories=["PII"]),
+        config_store=config_store,
+        audit_log=audit_log,
+    )(unsafe_message)
+    await discord.make_handler(
+        FakeCascade(VerdictLabel.CONTROVERSIAL, categories=["harassment"]),
+        config_store=config_store,
+        audit_log=audit_log,
+    )(controversial_message)
+
+    summary = audit_log.summary(Platform.DISCORD, "123", limit=10)
+    text = discord._stats_text(summary)
+
+    assert summary["total"] == 2
+    assert summary["verdicts"] == {"controversial": 1, "unsafe": 1}
+    assert summary["actions"] == {"delete": 1, "flag": 1}
+    assert summary["categories"] == {"PII": 1, "harassment": 1}
+    assert "total cases: `2`" in text
+    assert "unsafe:1" in text
+    assert "flag:1" in text
+    assert discord._stats_text(audit_log.summary(Platform.DISCORD, "missing")) == (
+        "**nemoguardian stats**\nNo moderation cases found."
+    )
+
+
 async def test_discord_build_bot_registers_slash_commands():
     pytest.importorskip("discord")
 
@@ -202,6 +234,7 @@ async def test_discord_build_bot_registers_slash_commands():
             "exempt_user",
             "case",
             "history",
+            "stats",
             "test",
         }.issubset(command_names)
     finally:

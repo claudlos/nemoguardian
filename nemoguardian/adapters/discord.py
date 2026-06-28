@@ -364,6 +364,20 @@ def build_bot():
         )
         await interaction.response.send_message(_history_text(records), ephemeral=True)
 
+    @group.command(name="stats", description="Summarize recent moderation cases.")
+    @app_commands.default_permissions(manage_guild=True)
+    async def stats(interaction, user: discord.Member | None = None, limit: int = 100) -> None:
+        if not await _require_manage_guild(interaction):
+            return
+        safe_limit = max(1, min(limit, 500))
+        summary = audit_log.summary(
+            Platform.DISCORD,
+            str(interaction.guild_id),
+            user_id=str(user.id) if user is not None else None,
+            limit=safe_limit,
+        )
+        await interaction.response.send_message(_stats_text(summary), ephemeral=True)
+
     @group.command(name="test", description="Test a message against the current policy.")
     @app_commands.default_permissions(manage_guild=True)
     async def test(interaction, text: str) -> None:
@@ -646,6 +660,33 @@ def _history_text(records: list[dict[str, Any]]) -> str:
             f"status `{record.get('execution_status', 'unknown')}`"
         )
     return "\n".join(lines)
+
+
+def _stats_text(summary: dict[str, Any]) -> str:
+    if int(summary.get("total") or 0) <= 0:
+        return "**nemoguardian stats**\nNo moderation cases found."
+
+    user_scope = f" user `{summary['user_id']}`" if summary.get("user_id") else ""
+    return (
+        "**nemoguardian stats**\n"
+        f"scope: `{summary.get('platform', 'unknown')}:{summary.get('workspace_id', 'unknown')}`"
+        f"{user_scope} last `{summary.get('limit', 0)}` cases\n"
+        f"total cases: `{summary.get('total', 0)}` dry run: `{summary.get('dry_run', 0)}` "
+        f"errors: `{summary.get('errors', 0)}`\n"
+        f"verdicts: `{_format_counts(summary.get('verdicts') or {})}`\n"
+        f"actions: `{_format_counts(summary.get('actions') or {})}`\n"
+        f"statuses: `{_format_counts(summary.get('statuses') or {})}`\n"
+        f"categories: `{_format_counts(summary.get('categories') or {})}`\n"
+        f"newest: `{summary.get('newest_case_id') or 'none'}` "
+        f"oldest: `{summary.get('oldest_case_id') or 'none'}`"
+    )
+
+
+def _format_counts(counts: dict[str, int], limit: int = 8) -> str:
+    if not counts:
+        return "none"
+    items = sorted(counts.items(), key=lambda item: (-int(item[1]), item[0]))[:limit]
+    return ", ".join(f"{name}:{count}" for name, count in items)
 
 
 def _format_score(value: Any) -> str:

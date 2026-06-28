@@ -8,6 +8,7 @@ import json
 import os
 import re
 import threading
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -107,6 +108,38 @@ class AuditLog:
                 break
         return matches
 
+    def summary(
+        self,
+        platform: Platform | str,
+        workspace_id: str,
+        *,
+        user_id: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        records = self.history(platform, workspace_id, user_id=user_id, limit=limit)
+        category_counts: Counter[str] = Counter()
+        for record in records:
+            category_counts.update(str(category) for category in record.get("categories") or [])
+        return {
+            "platform": Platform(platform).value,
+            "workspace_id": str(workspace_id),
+            "user_id": str(user_id) if user_id is not None else None,
+            "limit": max(0, limit),
+            "total": len(records),
+            "verdicts": dict(_count_field(records, "verdict")),
+            "actions": dict(_count_field(records, "action")),
+            "statuses": dict(_count_field(records, "execution_status")),
+            "categories": dict(category_counts),
+            "dry_run": sum(1 for record in records if record.get("dry_run")),
+            "errors": sum(
+                1
+                for record in records
+                if record.get("error") or record.get("execution_status") in {"failed", "partial"}
+            ),
+            "newest_case_id": records[0].get("case_id") if records else None,
+            "oldest_case_id": records[-1].get("case_id") if records else None,
+        }
+
     def _read_records(self) -> list[dict[str, Any]]:
         if not self.path.exists():
             return []
@@ -137,6 +170,10 @@ def redact_text(text: str) -> str:
 
 def redacted_excerpt(text: str, limit: int = 500) -> str:
     return excerpt(redact_text(text), limit=limit)
+
+
+def _count_field(records: list[dict[str, Any]], field_name: str) -> Counter[str]:
+    return Counter(str(record.get(field_name) or "unknown") for record in records)
 
 
 def text_hash(text: str) -> str:
