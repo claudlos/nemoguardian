@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
-from nemoguardian.billing import checkout, db, metered, provisioning
+from nemoguardian.billing import auth, checkout, db, metered, provisioning
 from nemoguardian.billing.plans import Tier
 
 
@@ -147,6 +149,23 @@ def test_checkout_falls_back_to_demo_on_stripe_error(monkeypatch):
     assert db.get_customer_by_email("err@example.com") is not None
 
 
+def test_portal_falls_back_to_demo_on_stripe_error(monkeypatch):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test")
+    customer = db.upsert_customer(email="portal-error@example.com", stripe_customer_id="cus_portal")
+
+    class BrokenPortalSession:
+        @staticmethod
+        def create(**_kwargs):
+            raise RuntimeError("stripe unavailable")
+
+    _install_stripe(monkeypatch, SimpleNamespace(billing_portal=SimpleNamespace(Session=BrokenPortalSession)))
+
+    session = checkout.create_portal_session(customer=customer, return_url="https://app.test/account")
+
+    assert session.demo_mode is True
+    assert session.url == "https://app.test/account?demo=portal"
+
+
 def test_portal_uses_stripe_when_customer_has_stripe_id(monkeypatch):
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test")
     customer = db.upsert_customer(email="portal@example.com", stripe_customer_id="cus_portal")
@@ -234,6 +253,28 @@ def test_report_usage_pushes_metered_usage_record(monkeypatch):
     assert info["total_calls"] == 3
 
 
+def test_report_usage_skips_stripe_when_customer_or_subscription_is_missing(monkeypatch):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test")
+    customer = db.upsert_customer(email="local-only@example.com")
+    calls: list[dict] = []
+
+    class FakeSubscription:
+        @staticmethod
+        def list(**kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(data=[])
+
+    _install_stripe(monkeypatch, SimpleNamespace(Subscription=FakeSubscription))
+
+    metered.report_usage(customer.id, call_type="standard", units=1)
+    assert calls == []
+
+    stripe_customer = db.upsert_customer(email="no-subscription@example.com", stripe_customer_id="cus_empty")
+    metered.report_usage(stripe_customer.id, call_type="standard", units=1)
+
+    assert calls == [{"customer": "cus_empty", "status": "active"}]
+
+
 def test_report_usage_ignores_stripe_errors_after_local_record(monkeypatch):
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test")
     customer = db.upsert_customer(email="usage-error@example.com", stripe_customer_id="cus_usage")
@@ -250,6 +291,43 @@ def test_report_usage_ignores_stripe_errors_after_local_record(monkeypatch):
     allowed, info = metered.check_allowance(customer.id)
     assert allowed is True
     assert info["total_calls"] == 2
+
+
+def test_check_allowance_handles_december_period_boundary(monkeypatch):
+    class FrozenDateTime:
+        @staticmethod
+        def now(_tz):
+            return datetime(2026, 12, 15, 12, 0, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(metered, "datetime", FrozenDateTime)
+    customer = db.upsert_customer(email="december@example.com")
+
+    allowed, info = metered.check_allowance(customer.id)
+
+    assert allowed is True
+    assert info["period_start"] == "2026-12-01T00:00:00+00:00"
+    assert info["period_end"] == "2027-01-01T00:00:00+00:00"
+
+
+async def test_require_api_key_rejects_bad_headers_and_uses_env_bootstrap(monkeypatch):
+    with pytest.raises(HTTPException) as invalid_scheme:
+        await auth.require_api_key("Basic nmg_test")
+    assert invalid_scheme.value.status_code == 401
+    assert "invalid Authorization header" in invalid_scheme.value.detail
+
+    with pytest.raises(HTTPException) as bad_prefix:
+        await auth.require_api_key("Bearer bad-key")
+    assert bad_prefix.value.status_code == 401
+    assert "must start with 'nmg_'" in bad_prefix.value.detail
+
+    monkeypatch.setenv("NEMOGUARDIAN_API_KEY", "nmg_env_bootstrap")
+    monkeypatch.setenv("NEMOGUARDIAN_TIER", "not-a-tier")
+    context = await auth.require_api_key("Bearer nmg_env_bootstrap")
+
+    assert context.customer.email == "self-hosted@nemoguardian.local"
+    assert context.plan.tier == Tier.SELF_HOSTED
+    assert context.raw_key == "nmg_env_bootstrap"
+    assert auth._upgrade_target("unknown.feature") == Tier.SCALE
 
 
 def test_provisioning_rejects_unknown_provider():
@@ -305,6 +383,25 @@ async def test_run_job_marks_remote_provider_live(monkeypatch):
         "ssh -i ~/.ssh/nemoguardian_vastai-abc123 "
         "nemoguardian@vastai-abc123.nemoguardian.dev"
     )
+
+
+async def test_run_job_marks_job_failed_on_provider_exception(monkeypatch):
+    async def fail_sleep(_seconds: float) -> None:
+        raise RuntimeError("provider down")
+
+    monkeypatch.setattr(provisioning.asyncio, "sleep", fail_sleep)
+    customer = db.upsert_customer(email="failed-provider@example.com")
+    job = db.create_provisioning_job(
+        customer.id,
+        tier=Tier.SELF_HOSTED,
+        provider="vastai",
+    )
+
+    await provisioning._run_job(job.id, "vastai", None)
+
+    got = db.get_provisioning_job(job.id)
+    assert got.status == "failed"
+    assert got.error_message == "provider down"
 
 
 def test_render_onprem_snippet_uses_placeholder_or_public_key():

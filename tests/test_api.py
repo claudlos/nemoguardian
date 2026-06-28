@@ -120,6 +120,23 @@ def client(monkeypatch, tmp_path):
     return test_client
 
 
+def test_reset_billing_db_for_tests_reinitializes_connection(monkeypatch):
+    from nemoguardian.billing import db as billing_db
+
+    calls = []
+
+    def fake_init_db(path=billing_db.DEFAULT_DB_PATH):
+        calls.append(path)
+
+    billing_db._conn = object()
+    monkeypatch.setattr(billing_db, "init_db", fake_init_db)
+
+    srv._reset_billing_db_for_tests()
+
+    assert billing_db._conn is None
+    assert calls == [billing_db.DEFAULT_DB_PATH, billing_db.DEFAULT_DB_PATH]
+
+
 def test_health(client):
     r = client.get("/health")
     assert r.status_code == 200

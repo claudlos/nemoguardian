@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import runpy
 import sys
 from types import SimpleNamespace
 
+import pytest
 from typer.testing import CliRunner
 
 import nemoguardian.cli as cli_module
@@ -162,6 +164,26 @@ def test_python_module_main_invokes_cli_app(monkeypatch):
     main_module.main()
 
     assert called["app"] is True
+
+
+def test_python_package_main_guard_invokes_cli_app(monkeypatch):
+    called = {"app": False}
+    monkeypatch.setattr(cli_module, "app", lambda: called.update(app=True))
+
+    with pytest.warns(RuntimeWarning, match="found in sys.modules"):
+        namespace = runpy.run_module("nemoguardian.__main__", run_name="__main__")
+
+    assert namespace["__name__"] == "__main__"
+    assert called["app"] is True
+
+
+def test_cli_module_main_guard_shows_help(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["python -m nemoguardian.cli", "--help"])
+
+    with pytest.warns(RuntimeWarning, match="found in sys.modules"), pytest.raises(SystemExit) as exc:
+        runpy.run_module("nemoguardian.cli", run_name="__main__")
+
+    assert exc.value.code == 0
 
 
 def test_bot_audit_cli_stats_history_and_offenders(tmp_path):

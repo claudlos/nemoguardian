@@ -38,6 +38,18 @@ def test_aggregate_all_unsafe():
     assert out.score >= 0.70
 
 
+def test_aggregate_can_be_unsafe_by_weighted_score_without_hard_override():
+    out = aggregate(
+        {
+            "qwen3_guard_gen": _mv("q", "controversial", 0.95),
+            "nemotron_csr": _mv("c", "controversial", 0.90),
+        }
+    )
+
+    assert out.verdict == VerdictLabel.UNSAFE
+    assert out.score > 0.70
+
+
 def test_aggregate_controversial_split():
     out = aggregate(
         {

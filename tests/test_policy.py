@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from nemoguardian.cascade import Cascade, CascadeConfig
 from nemoguardian.policy.nemoclaw import NemoclawPolicy
 from nemoguardian.policy.presets import get_preset
@@ -35,6 +37,11 @@ def test_generic_preset_no_rules():
     decision = policy.evaluate(verdict=VerdictLabel.SAFE, score=0.5, categories=[])
     assert decision.matched_rule is None
     assert decision.final_label is None
+
+
+def test_unknown_policy_preset_reports_available_names():
+    with pytest.raises(KeyError, match="unknown preset"):
+        get_preset("missing")
 
 
 def test_policy_from_yaml(tmp_path):
@@ -110,6 +117,44 @@ def test_policy_text_condition_requires_policy_text():
         categories=[],
     )
     assert decision.matched_rule is None
+
+
+def test_policy_conditions_reject_non_matching_inputs():
+    cases = [
+        (
+            {"model_verdict": "unsafe"},
+            {"verdict": VerdictLabel.SAFE, "score": 0.9, "categories": [], "policy_text": None},
+        ),
+        (
+            {"score_above": 0.8},
+            {"verdict": VerdictLabel.UNSAFE, "score": 0.8, "categories": [], "policy_text": None},
+        ),
+        (
+            {"score_below": 0.2},
+            {"verdict": VerdictLabel.SAFE, "score": 0.2, "categories": [], "policy_text": None},
+        ),
+        (
+            {"policy_text_contains": "no spoilers"},
+            {
+                "verdict": VerdictLabel.CONTROVERSIAL,
+                "score": 0.5,
+                "categories": [],
+                "policy_text": "financial advice only",
+            },
+        ),
+    ]
+
+    for condition, inputs in cases:
+        policy = NemoclawPolicy.from_dict(
+            {
+                "name": "non-match",
+                "rules": [{"id": "reject", "when": condition, "then": {"final_label": "unsafe"}}],
+            }
+        )
+
+        decision = policy.evaluate(**inputs)
+
+        assert decision.matched_rule is None
 
 
 def test_cascade_passes_policy_text_to_policy_gate():

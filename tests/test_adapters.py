@@ -1651,6 +1651,19 @@ def test_twitch_run_bot_registers_event_and_ignores_echo(monkeypatch):
     assert calls == [{"text": "drop your SSN", "user_id": "7", "username": "viewer"}]
 
 
+def test_twitch_module_main_starts_fake_bot(monkeypatch):
+    bots = _install_fake_twitch(monkeypatch, [])
+    monkeypatch.setenv("TWITCH_TOKEN", "twitch-test-token")
+    monkeypatch.setattr(sys, "argv", ["python -m nemoguardian.adapters.twitch", "nemoguardian"])
+
+    with pytest.warns(RuntimeWarning, match="found in sys.modules"):
+        runpy.run_module("nemoguardian.adapters.twitch", run_name="__main__")
+
+    assert bots[0].token == "twitch-test-token"
+    assert bots[0].initial_channels == ["nemoguardian"]
+    assert bots[0].run_called is True
+
+
 def test_twitch_module_main_requires_channel(monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["python -m nemoguardian.adapters.twitch"])
 
