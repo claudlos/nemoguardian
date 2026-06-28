@@ -150,6 +150,18 @@ payment-card patterns before storage or reposting. The raw message text is still
 hashed with SHA-256 for evidence correlation without storing the original
 sensitive string in the JSONL case record.
 
+## Offline Audit Inspection
+
+Use the CLI when the bot is running on a host and Discord is unavailable or you
+need shell-friendly JSON output:
+
+```bash
+nemoguardian bot-audit history --workspace-id "$DISCORD_GUILD_ID" --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+nemoguardian bot-audit stats --workspace-id "$DISCORD_GUILD_ID" --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+nemoguardian bot-audit offenders --workspace-id "$DISCORD_GUILD_ID" --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+nemoguardian bot-audit case discord-<guild-id>-<message-id> --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+```
+
 ## Cross-Platform Foundation
 
 The shared bot layer lives under `nemoguardian/bot/`:

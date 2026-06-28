@@ -8,14 +8,18 @@ Use:
 from __future__ import annotations
 
 import json
+from pathlib import Path
+from typing import Any
 
 import typer
 
+from nemoguardian.bot import AuditLog, Platform
 from nemoguardian.cascade import Cascade, CascadeConfig
 from nemoguardian.policy.presets import get_preset
 from nemoguardian.schemas import Mode, ModerateRequest
 
 app = typer.Typer(help="Multi-model LLM moderation cascade.")
+audit_app = typer.Typer(help="Inspect moderation bot audit logs.")
 
 
 @app.command()
@@ -65,6 +69,64 @@ def discord_bot() -> None:
     from nemoguardian.adapters.discord import run_bot
 
     run_bot()
+
+
+@audit_app.command("case")
+def audit_case(
+    case_id: str = typer.Argument(..., help="Case ID to look up."),
+    path: Path | None = typer.Option(None, "--path", help="Audit JSONL path."),
+) -> None:
+    """Print one audit case as JSON."""
+    record = AuditLog(path).find_case(case_id)
+    if record is None:
+        raise typer.BadParameter(f"case not found: {case_id}")
+    _echo_json(record)
+
+
+@audit_app.command("history")
+def audit_history(
+    workspace_id: str = typer.Option(..., "--workspace-id", help="Platform workspace/guild/channel ID."),
+    platform: Platform = typer.Option(Platform.DISCORD, "--platform", help="Bot platform."),
+    user_id: str | None = typer.Option(None, "--user-id", help="Optional user ID filter."),
+    limit: int = typer.Option(10, "--limit", min=1, max=100, help="Maximum records to print."),
+    path: Path | None = typer.Option(None, "--path", help="Audit JSONL path."),
+) -> None:
+    """Print recent audit cases as JSON."""
+    records = AuditLog(path).history(platform, workspace_id, user_id=user_id, limit=limit)
+    _echo_json(records)
+
+
+@audit_app.command("stats")
+def audit_stats(
+    workspace_id: str = typer.Option(..., "--workspace-id", help="Platform workspace/guild/channel ID."),
+    platform: Platform = typer.Option(Platform.DISCORD, "--platform", help="Bot platform."),
+    user_id: str | None = typer.Option(None, "--user-id", help="Optional user ID filter."),
+    limit: int = typer.Option(100, "--limit", min=1, max=1_000, help="Recent cases to summarize."),
+    path: Path | None = typer.Option(None, "--path", help="Audit JSONL path."),
+) -> None:
+    """Print audit case counts as JSON."""
+    summary = AuditLog(path).summary(platform, workspace_id, user_id=user_id, limit=limit)
+    _echo_json(summary)
+
+
+@audit_app.command("offenders")
+def audit_offenders(
+    workspace_id: str = typer.Option(..., "--workspace-id", help="Platform workspace/guild/channel ID."),
+    platform: Platform = typer.Option(Platform.DISCORD, "--platform", help="Bot platform."),
+    limit: int = typer.Option(10, "--limit", min=1, max=50, help="Maximum users to print."),
+    case_limit: int = typer.Option(500, "--case-limit", min=1, max=5_000, help="Recent cases to inspect."),
+    path: Path | None = typer.Option(None, "--path", help="Audit JSONL path."),
+) -> None:
+    """Print users with the most recent moderation cases as JSON."""
+    rows = AuditLog(path).top_users(platform, workspace_id, limit=limit, case_limit=case_limit)
+    _echo_json(rows)
+
+
+def _echo_json(payload: Any) -> None:
+    typer.echo(json.dumps(payload, indent=2, sort_keys=True, default=str))
+
+
+app.add_typer(audit_app, name="bot-audit")
 
 
 if __name__ == "__main__":

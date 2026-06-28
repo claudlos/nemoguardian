@@ -132,6 +132,14 @@ Initial server setup:
 /nemoguardian offenders limit:5 case_limit:500
 ```
 
+Offline audit inspection:
+
+```bash
+nemoguardian bot-audit stats --workspace-id "$DISCORD_GUILD_ID" --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+nemoguardian bot-audit offenders --workspace-id "$DISCORD_GUILD_ID" --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+nemoguardian bot-audit case discord-<guild-id>-<message-id> --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+```
+
 Required Discord app setup: OAuth scopes `bot` and `applications.commands`;
 bot permissions View Channel, Read Message History, Send Messages, Embed Links,
 Manage Messages, and Moderate Members; Gateway intents Guilds, Guild Messages,
