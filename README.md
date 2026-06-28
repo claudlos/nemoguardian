@@ -234,28 +234,6 @@ make final-submission-check FINAL_CHECK_FLAGS="--video-url https://<hosted-demo-
 - `standard` — Qwen3Guard-Gen + Nemotron-CSR. Reasoning is controlled by `NEMOGUARDIAN_REASONING`.
 - `deep` — Local guard stack + API-backed Nemotron 3 Ultra triage to explain disagreements.
 
-## What's real vs simulated for the demo
-
-**Real, shipping:**
-- The FastAPI service and cascade orchestration
-- The `/demo` moderation console backed by the real cascade
-- Real Qwen3Guard-Gen 4B inference on CPU/GPU
-- Real Nemotron-CSR 4B with custom-policy mode (Reasoning On)
-- API-backed Nemotron 3 Ultra triage via NVIDIA/OpenRouter OpenAI-compatible API
-- NemoClaw policy gate (yaml → decision)
-- Discord moderation bot with slash-command setup, mod logs, dry-run mode, timeouts, and audit records
-- Shared bot foundation for Discord, Twitch, and future platform adapters
-- Per-platform policy presets
-- Stripe subscriptions + customer portal + metered billing + webhook
-- 9-cloud provider registry (Vast.ai live, others stubbed with real catalog data)
-- Docker image + docker-compose for self-hosted
-
-**Simulated / cached for the demo video:**
-- Non-Vast provider prices use static catalog rows unless their provider credentials are wired.
-- Stripe checkout and portal sessions fall back to demo URLs when Stripe secrets are absent.
-
-## Providers (self-hosted tier)
-
 nemoguardian runs on **commodity GPUs starting at $0.07/hr**. The same Docker image
 works on every option. See `GET /providers/offers` for live pricing.
 
@@ -308,17 +286,6 @@ nemoguardian/
     ├── framework_smoke.py     ← adapter/framework end-to-end check
     └── demo_host_check.py     ← running-demo evidence check
 ```
-
-## The submission video plan (60–90 seconds)
-
-See `docs/VIDEO_SCRIPT.md` for the exact shot list and narration.
-
-1. Live demo: type a message into `/demo`
-2. Show the verdict fly out within ~200ms with the per-model breakdown
-3. Rotate the policy from "default" to "no financial advice" — same input, different verdict
-4. Show the audit log: every model's verdict + reasoning + latency
-5. Close on the live Nemotron 3 Ultra triage explaining a multi-model disagreement
-
 ## License
 
 Apache 2.0 for this repository's code. Model weights and hosted model APIs
