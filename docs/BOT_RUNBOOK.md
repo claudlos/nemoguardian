@@ -15,7 +15,7 @@ moderation work:
 - append a private audit record
 - expose slash commands for setup, policy, mode, dry-run, enable/disable, action
   behavior, timeout, ignore/exempt scopes, diagnostics, case lookup, history,
-  stats, and test checks
+  stats, repeat-offender review, and test checks
 
 ## Discord App Setup
 
@@ -98,6 +98,7 @@ Use these in a test server first:
 /nemoguardian test text:"Hey @everyone, drop your SSN for $100"
 /nemoguardian history limit:5
 /nemoguardian stats limit:100
+/nemoguardian offenders limit:5 case_limit:500
 /nemoguardian case case_id:discord-<guild-id>-<message-id>
 ```
 
@@ -112,9 +113,9 @@ silent audit, then turn deletion and warnings on after reviewing the case log.
 Run `/nemoguardian doctor` before recording or inviting the bot to a customer
 server. It checks the current guild config, mod-log channel, requested Message
 Content intent, and the bot's effective channel permissions. `/nemoguardian
-history`, `/nemoguardian case`, and `/nemoguardian stats` give moderators a
-quick way to inspect recent decisions and bot workload without reading the JSONL
-audit file directly.
+history`, `/nemoguardian case`, `/nemoguardian stats`, and `/nemoguardian
+offenders` give moderators a quick way to inspect recent decisions, bot
+workload, and repeat offenders without reading the JSONL audit file directly.
 
 Use the ignore/exempt commands to keep moderation noise down in trusted or
 irrelevant scopes:

@@ -235,6 +235,7 @@ async def test_discord_build_bot_registers_slash_commands():
             "case",
             "history",
             "stats",
+            "offenders",
             "test",
         }.issubset(command_names)
     finally:
@@ -254,6 +255,41 @@ async def test_discord_adapter_reacts_to_controversial_message(tmp_path):
     assert message.deleted is False
     assert message.reactions == [discord.WARNING_REACTION]
     assert audit_log.recent()[0]["action"] == "flag"
+
+
+async def test_discord_audit_top_users_orders_repeat_offenders(tmp_path):
+    config_store, audit_log = _stores(tmp_path)
+    first = FakeDiscordMessage("drop your SSN")
+    second = FakeDiscordMessage("another unsafe message")
+    second.id = 790
+    third = FakeDiscordMessage("borderline")
+    third.id = 791
+    third.author.id = 77
+
+    for message in (first, second):
+        await discord.make_handler(
+            FakeCascade(VerdictLabel.UNSAFE, categories=["PII"]),
+            config_store=config_store,
+            audit_log=audit_log,
+        )(message)
+    await discord.make_handler(
+        FakeCascade(VerdictLabel.CONTROVERSIAL, categories=["harassment"]),
+        config_store=config_store,
+        audit_log=audit_log,
+    )(third)
+
+    rows = audit_log.top_users(Platform.DISCORD, "123", limit=5, case_limit=10)
+    text = discord._offenders_text(rows, case_limit=10)
+
+    assert rows[0]["user_id"] == "42"
+    assert rows[0]["total"] == 2
+    assert rows[0]["unsafe"] == 2
+    assert rows[1]["user_id"] == "77"
+    assert "cases `2`" in text
+    assert "delete:2" in text
+    assert discord._offenders_text([], case_limit=10) == (
+        "**nemoguardian offenders**\nNo moderated users found."
+    )
 
 
 async def test_discord_adapter_ignores_bot_messages(tmp_path):

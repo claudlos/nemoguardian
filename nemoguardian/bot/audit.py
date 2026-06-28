@@ -140,6 +140,54 @@ class AuditLog:
             "oldest_case_id": records[-1].get("case_id") if records else None,
         }
 
+    def top_users(
+        self,
+        platform: Platform | str,
+        workspace_id: str,
+        *,
+        limit: int = 10,
+        case_limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0 or case_limit <= 0:
+            return []
+        records = self.history(platform, workspace_id, limit=case_limit)
+        by_user: dict[str, dict[str, Any]] = {}
+        for record in records:
+            user_id = str(record.get("user_id") or "unknown")
+            entry = by_user.setdefault(
+                user_id,
+                {
+                    "user_id": user_id,
+                    "username": str(record.get("username") or "unknown"),
+                    "total": 0,
+                    "unsafe": 0,
+                    "controversial": 0,
+                    "actions": Counter(),
+                    "categories": Counter(),
+                    "latest_case_id": record.get("case_id"),
+                    "latest_created_at": record.get("created_at"),
+                },
+            )
+            entry["total"] += 1
+            if record.get("verdict") == "unsafe":
+                entry["unsafe"] += 1
+            if record.get("verdict") == "controversial":
+                entry["controversial"] += 1
+            entry["actions"].update([str(record.get("action") or "unknown")])
+            entry["categories"].update(str(category) for category in record.get("categories") or [])
+
+        rows = []
+        for entry in by_user.values():
+            rows.append(
+                {
+                    **entry,
+                    "actions": dict(entry["actions"]),
+                    "categories": dict(entry["categories"]),
+                }
+            )
+        rows.sort(key=lambda entry: (-entry["total"], -entry["unsafe"], entry["user_id"]))
+        return rows[:limit]
+
     def _read_records(self) -> list[dict[str, Any]]:
         if not self.path.exists():
             return []

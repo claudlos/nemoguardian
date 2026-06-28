@@ -378,6 +378,24 @@ def build_bot():
         )
         await interaction.response.send_message(_stats_text(summary), ephemeral=True)
 
+    @group.command(name="offenders", description="Show users with the most recent moderation cases.")
+    @app_commands.default_permissions(manage_guild=True)
+    async def offenders(interaction, limit: int = 5, case_limit: int = 500) -> None:
+        if not await _require_manage_guild(interaction):
+            return
+        safe_limit = max(1, min(limit, 10))
+        safe_case_limit = max(1, min(case_limit, 1_000))
+        rows = audit_log.top_users(
+            Platform.DISCORD,
+            str(interaction.guild_id),
+            limit=safe_limit,
+            case_limit=safe_case_limit,
+        )
+        await interaction.response.send_message(
+            _offenders_text(rows, case_limit=safe_case_limit),
+            ephemeral=True,
+        )
+
     @group.command(name="test", description="Test a message against the current policy.")
     @app_commands.default_permissions(manage_guild=True)
     async def test(interaction, text: str) -> None:
@@ -687,6 +705,22 @@ def _format_counts(counts: dict[str, int], limit: int = 8) -> str:
         return "none"
     items = sorted(counts.items(), key=lambda item: (-int(item[1]), item[0]))[:limit]
     return ", ".join(f"{name}:{count}" for name, count in items)
+
+
+def _offenders_text(rows: list[dict[str, Any]], *, case_limit: int) -> str:
+    if not rows:
+        return "**nemoguardian offenders**\nNo moderated users found."
+
+    lines = [f"**nemoguardian offenders**\nlast `{case_limit}` cases"]
+    for index, row in enumerate(rows, start=1):
+        lines.append(
+            f"{index}. user `{row.get('username', 'unknown')}` (`{row.get('user_id', 'unknown')}`) "
+            f"cases `{row.get('total', 0)}` unsafe `{row.get('unsafe', 0)}` "
+            f"controversial `{row.get('controversial', 0)}` "
+            f"actions `{_format_counts(row.get('actions') or {}, limit=3)}` "
+            f"latest `{row.get('latest_case_id') or 'none'}`"
+        )
+    return "\n".join(lines)
 
 
 def _format_score(value: Any) -> str:
