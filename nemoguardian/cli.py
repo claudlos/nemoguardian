@@ -59,5 +59,13 @@ def demo(
     typer.echo(json.dumps(result.model_dump(), indent=2, default=str))
 
 
+@app.command("discord-bot")
+def discord_bot() -> None:
+    """Run the Discord moderation bot."""
+    from nemoguardian.adapters.discord import run_bot
+
+    run_bot()
+
+
 if __name__ == "__main__":
     app()

@@ -60,7 +60,17 @@ docker run --rm --entrypoint sh nemoguardian/self-hosted:latest \
   -c 'test -s /opt/nemoguardian/LICENSE && test -s /opt/nemoguardian/NOTICE && test -s /opt/nemoguardian/docs/THIRD_PARTY_MODELS.md && test -s /opt/nemoguardian/docs/MODEL_CATALOG.md'
 ```
 
-## 4. GPU Demo Host
+## 4. Discord Bot Readiness
+
+Before presenting the bot as the product surface:
+
+- `docs/BOT_RUNBOOK.md` exists and lists Discord scopes, permissions, intents, and setup commands.
+- `DISCORD_BOT_TOKEN` is only supplied through the environment or a secret manager.
+- `NEMOGUARDIAN_BOT_CONFIG_PATH` and `NEMOGUARDIAN_BOT_AUDIT_PATH` point outside the repo for live runs.
+- Adapter tests cover unsafe delete, controversial flag, bot-message ignore, mod-log output, Twitch action planning, and webhook auth.
+- For a live Discord recording, install with `bot` + `applications.commands`, enable Message Content intent, and run `/nemoguardian setup` in a test server first.
+
+## 5. GPU Demo Host
 
 Follow `docs/VASTAI_DEMO_RUNBOOK.md`.
 
@@ -87,7 +97,7 @@ If running the service from an activated host virtualenv instead of Docker,
 make demo-check DEMO_CHECK_FLAGS="--wait-seconds 120 --require-gpu --require-triage --moderate --deep --output demo-evidence.json"
 ```
 
-## 5. Recording
+## 6. Recording
 
 Use `docs/VIDEO_SCRIPT.md`.
 
@@ -98,7 +108,7 @@ Before recording:
 - Keep the `/providers/offers` table or demo GPU table visible long enough to prove the commodity GPU cost story.
 - Do not record a final take until both real-model smoke commands pass on the GPU host.
 
-## 6. Submission Links
+## 7. Submission Links
 
 After `demo-evidence.json` and the hosted video URL exist, paste the final video
 URL into `docs/SUBMISSION_FORM.md` and run:

@@ -14,29 +14,47 @@ import os
 import sys
 from collections.abc import Callable
 
+from nemoguardian.bot import AuditLog, ConfigStore, ModerationContext, ModerationEngine, Platform
 from nemoguardian.cascade import Cascade, CascadeConfig
-from nemoguardian.policy.presets import get_preset
-from nemoguardian.schemas import Mode, ModerateRequest, VerdictLabel
 
 
 def make_moderator(
     cascade: Cascade | None = None,
     *,
+    config_store: ConfigStore | None = None,
+    audit_log: AuditLog | None = None,
+    channel_id: str = "twitch",
     emit: Callable[[str], None] = print,
 ):
     cascade = cascade or Cascade(CascadeConfig.from_env())
-    policy = get_preset("twitch")
+    engine = ModerationEngine(
+        Platform.TWITCH,
+        cascade=cascade,
+        config_store=config_store,
+        audit_log=audit_log,
+    )
 
-    async def moderate(text: str) -> str:
-        request = ModerateRequest(text=text, mode=Mode.FAST)
-        result = await asyncio.to_thread(cascade.moderate, request, policy_engine=policy)
-        # In a real Twitch integration: send /delete or /timeout via PRIVMSG.
-        action = {
-            VerdictLabel.SAFE: "allow",
-            VerdictLabel.CONTROVERSIAL: "flag",
-            VerdictLabel.UNSAFE: "delete",
-        }.get(result.verdict, "allow")
-        emit(f"[twitch] {action}: {text[:60]} ({result.verdict.value}, score={result.score})")
+    async def moderate(text: str, *, user_id: str = "unknown", username: str = "unknown") -> str:
+        config = engine.config_for(channel_id)
+        context = ModerationContext(
+            platform=Platform.TWITCH,
+            workspace_id=channel_id,
+            channel_id=channel_id,
+            message_id=f"twitch-{abs(hash((channel_id, user_id, text))) % 10_000_000}",
+            user_id=user_id,
+            username=username,
+            text=text,
+        )
+        evaluation = await asyncio.to_thread(engine.evaluate, context, config)
+        action = evaluation.plan.action.value
+        if evaluation.result is not None:
+            engine.record(evaluation, execution_status=action)
+            emit(
+                f"[twitch] {action}: {text[:60]} "
+                f"({evaluation.result.verdict.value}, score={evaluation.result.score})"
+            )
+        else:
+            emit(f"[twitch] allow: {text[:60]} (skipped={evaluation.skip_reason})")
         return action
 
     return moderate
@@ -56,7 +74,11 @@ def run_bot(channel: str) -> None:
     async def event_message(message) -> None:
         if message.echo:
             return
-        await moderate(message.content)
+        await moderate(
+            message.content,
+            user_id=str(getattr(message.author, "id", "unknown")),
+            username=str(getattr(message.author, "name", "unknown")),
+        )
 
     bot.run()
 

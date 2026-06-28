@@ -35,7 +35,9 @@ RUN python -m venv /opt/venv \
         "tenacity>=8.2" \
         "structlog>=24.1" \
         "typer>=0.12" \
-        "numpy>=1.26"
+        "numpy>=1.26" \
+        "discord.py>=2.3" \
+        "twitchio>=2.10"
 
 ENV PATH="/opt/venv/bin:${PATH}"
 

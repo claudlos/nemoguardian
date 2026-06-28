@@ -392,16 +392,43 @@ class _FakeCascade:
             verdict=self.verdict,
             categories=self.categories,
             score=0.95,
+            mode=request.mode,
+            matched_policy_rule="framework-smoke" if self.categories else None,
+            request_id="framework-smoke",
+            total_latency_ms=1.0,
         )
+
+
+class _FakeDiscordGuild:
+    id = 123
+    name = "Framework Smoke Guild"
+
+    def get_channel(self, channel_id: int) -> None:
+        return None
+
+
+class _FakeDiscordAuthor:
+    id = 42
+    mention = "@tester"
+
+    def __init__(self, *, bot: bool) -> None:
+        self.bot = bot
+        self.roles: list[Any] = []
+
+    def __str__(self) -> str:
+        return "tester"
 
 
 class _FakeDiscordMessage:
     def __init__(self, content: str, *, bot: bool = False) -> None:
+        self.id = 789
         self.content = content
-        self.author = SimpleNamespace(bot=bot, mention="@tester")
-        self.channel = SimpleNamespace(messages=[])
+        self.author = _FakeDiscordAuthor(bot=bot)
+        self.channel = SimpleNamespace(id=456, messages=[])
+        self.guild = _FakeDiscordGuild()
         self.deleted = False
         self.reactions: list[str] = []
+        self.jump_url = "https://discord.test/message/789"
 
         async def send(message: str) -> None:
             self.channel.messages.append(message)

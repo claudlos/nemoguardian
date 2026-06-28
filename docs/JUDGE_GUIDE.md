@@ -29,8 +29,11 @@ Useful files:
 - `docs/SUBMISSION_FORM.md` - copy/paste hackathon form answers.
 - `docs/THIRD_PARTY_MODELS.md` - model/license manifest.
 - `docs/MODEL_CATALOG.md` - model selection notes.
+- `docs/BOT_RUNBOOK.md` - Discord bot setup and moderation workflow.
 - `nemoguardian/server.py` - FastAPI routes.
 - `nemoguardian/cascade.py` - model orchestration.
+- `nemoguardian/bot/` - platform-neutral bot config, action planning, and audit logs.
+- `nemoguardian/adapters/discord.py` - Discord bot commands and message actions.
 - `nemoguardian/billing/` - Stripe-style plans, auth, usage, webhooks.
 - `nemoguardian/providers/` - GPU provider registry and Vast.ai client.
 

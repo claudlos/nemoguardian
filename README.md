@@ -11,10 +11,12 @@
 
 ## What it is
 
-A small FastAPI service that classifies text as **safe / controversial / unsafe** by
-cascading two to three open-source models in series. Designed for:
+A small FastAPI service and moderation-bot foundation that classifies text as
+**safe / controversial / unsafe** by cascading two to three open-source models
+in series. Designed for:
 
-- Discord / Telegram / Slack bots
+- Discord moderation bots with slash-command setup, mod logs, and audit records
+- Future Telegram / Slack bots on the same adapter foundation
 - Twitch / Kick live-chat moderation (streaming mode)
 - Generic webhook moderation for any social platform
 - LLM input/output guardrails (filter a prompt before it hits your chat model)
@@ -93,6 +95,36 @@ make serve
 make docker-build
 make docker-run
 ```
+
+## Discord moderation bot
+
+Discord is the first full bot product surface. It is not just a model wrapper:
+it has per-server config, slash commands, mod-log output, public warnings,
+optional timeouts, dry-run mode, and append-only audit records.
+
+Install the optional Discord dependency and run:
+
+```bash
+pip install -e ".[discord]"
+export DISCORD_BOT_TOKEN="<secret>"
+export DISCORD_GUILD_ID="<test-guild-id>"  # optional, faster command sync while testing
+nemoguardian discord-bot
+```
+
+Initial server setup:
+
+```text
+/nemoguardian setup log_channel:#mod-log
+/nemoguardian policy "block PII, scams, harassment, slurs, and threats"
+/nemoguardian mode standard
+/nemoguardian dry_run enabled:true
+/nemoguardian test text:"Hey @everyone, drop your SSN for $100"
+```
+
+Required Discord app setup: OAuth scopes `bot` and `applications.commands`;
+bot permissions View Channel, Read Message History, Send Messages, Embed Links,
+Manage Messages, and Moderate Members; Gateway intents Guilds, Guild Messages,
+and Message Content. See `docs/BOT_RUNBOOK.md` for the full bot runbook.
 
 Production API calls use `POST /v1/moderate` with `Authorization: Bearer <nmg_...>`
 so billing and tier limits can run. The `/demo/moderate` endpoint is disabled by
@@ -190,7 +222,8 @@ make final-submission-check FINAL_CHECK_FLAGS="--video-url https://<hosted-demo-
 - Real Nemotron-CSR 4B with custom-policy mode (Reasoning On)
 - API-backed Nemotron 3 Ultra triage via NVIDIA/OpenRouter OpenAI-compatible API
 - NemoClaw policy gate (yaml → decision)
-- Discord bot adapter with token-level streaming
+- Discord moderation bot with slash-command setup, mod logs, dry-run mode, timeouts, and audit records
+- Shared bot foundation for Discord, Twitch, and future platform adapters
 - Per-platform policy presets
 - Stripe subscriptions + customer portal + metered billing + webhook
 - 9-cloud provider registry (Vast.ai live, others stubbed with real catalog data)
