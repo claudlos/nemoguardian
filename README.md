@@ -101,6 +101,8 @@ make docker-run
 Discord is the first full bot product surface. It is not just a model wrapper:
 it has per-server config, slash commands, mod-log output, public warnings,
 optional timeouts, dry-run mode, and append-only audit records.
+Mod-log and audit excerpts redact common sensitive patterns while retaining a
+SHA-256 hash of the original message for case correlation.
 
 Install the optional Discord dependency and run:
 

@@ -142,6 +142,11 @@ Audit records are append-only JSONL and include:
 - request ID, latency, redacted text excerpt
 - execution status and any action errors
 
+Mod-log case text and audit excerpts redact common email, SSN, phone, and
+payment-card patterns before storage or reposting. The raw message text is still
+hashed with SHA-256 for evidence correlation without storing the original
+sensitive string in the JSONL case record.
+
 ## Cross-Platform Foundation
 
 The shared bot layer lives under `nemoguardian/bot/`:

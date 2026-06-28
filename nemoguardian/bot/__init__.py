@@ -1,6 +1,6 @@
 """Shared moderation-bot foundation."""
 
-from nemoguardian.bot.audit import AuditLog, AuditRecord
+from nemoguardian.bot.audit import AuditLog, AuditRecord, redact_text, redacted_excerpt, text_hash
 from nemoguardian.bot.config import BotConfig, ConfigStore
 from nemoguardian.bot.engine import (
     ModerationContext,
@@ -21,4 +21,7 @@ __all__ = [
     "ModerationEvaluation",
     "ModerationPlan",
     "Platform",
+    "redact_text",
+    "redacted_excerpt",
+    "text_hash",
 ]

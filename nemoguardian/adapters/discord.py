@@ -22,6 +22,7 @@ from nemoguardian.bot import (
     ModerationEngine,
     ModerationEvaluation,
     Platform,
+    redacted_excerpt,
 )
 from nemoguardian.bot.types import ModerationAction
 from nemoguardian.cascade import Cascade
@@ -460,7 +461,7 @@ def _mod_log_text(
         f"action: `{evaluation.plan.action.value}` applied: `{applied_text}` errors: `{error_text}`\n"
         f"categories: `{category_text}`\n"
         f"rule: `{result.matched_policy_rule or 'none'}` request: `{result.request_id or 'none'}`\n"
-        f"message: {evaluation.context.text[:500]}"
+        f"message: {redacted_excerpt(evaluation.context.text)}"
     )
 
 

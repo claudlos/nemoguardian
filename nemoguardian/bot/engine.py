@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from nemoguardian.bot.audit import AuditLog, AuditRecord, excerpt, text_hash
+from nemoguardian.bot.audit import AuditLog, AuditRecord, redacted_excerpt, text_hash
 from nemoguardian.bot.config import BotConfig, ConfigStore
 from nemoguardian.bot.types import ModerationAction, Platform
 from nemoguardian.cascade import Cascade, CascadeConfig
@@ -106,11 +106,11 @@ class ModerationEngine:
             request_id=evaluation.result.request_id,
             latency_ms=evaluation.result.total_latency_ms,
             text_sha256=text_hash(evaluation.context.text),
-            text_excerpt=excerpt(evaluation.context.text),
+            text_excerpt=redacted_excerpt(evaluation.context.text),
             dry_run=evaluation.config.dry_run,
             execution_status=execution_status,
             error=error,
-            details={"permalink": evaluation.context.permalink},
+            details={"permalink": evaluation.context.permalink, "text_redacted": True},
         )
         self.audit_log.append(record)
 

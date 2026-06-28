@@ -9,6 +9,7 @@ import pytest
 
 from nemoguardian.adapters import discord, twitch, webhook
 from nemoguardian.bot import AuditLog, BotConfig, ConfigStore, Platform
+from nemoguardian.bot.audit import text_hash
 from nemoguardian.schemas import Mode, ModerateResponse, VerdictLabel
 
 
@@ -130,6 +131,33 @@ async def test_discord_adapter_sends_mod_log_when_configured(tmp_path):
     assert message.guild.log_channel.messages
     assert "nemoguardian moderation" in message.guild.log_channel.messages[0]
     assert "verdict: `unsafe`" in message.guild.log_channel.messages[0]
+
+
+async def test_discord_mod_log_and_audit_redact_sensitive_evidence(tmp_path):
+    config_store, audit_log = _stores(tmp_path)
+    config = BotConfig.default(Platform.DISCORD, "123")
+    config.log_channel_id = "999"
+    config_store.save(config)
+    message = FakeDiscordMessage(
+        "email jane@example.com SSN 123-45-6789 phone 555-123-4567 card 4111 1111 1111 1111"
+    )
+
+    await discord.make_handler(
+        FakeCascade(VerdictLabel.UNSAFE, categories=["PII"]),
+        config_store=config_store,
+        audit_log=audit_log,
+    )(message)
+
+    mod_log = message.guild.log_channel.messages[0]
+    record = audit_log.recent()[0]
+    for value in ("jane@example.com", "123-45-6789", "555-123-4567", "4111 1111 1111 1111"):
+        assert value not in mod_log
+        assert value not in record["text_excerpt"]
+    for marker in ("[email]", "[ssn]", "[phone]", "[payment-card]"):
+        assert marker in mod_log
+        assert marker in record["text_excerpt"]
+    assert record["text_sha256"] == text_hash(message.content)
+    assert record["details"]["text_redacted"] is True
 
 
 async def test_discord_audit_log_supports_case_lookup_and_history(tmp_path):

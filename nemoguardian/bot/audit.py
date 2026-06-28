@@ -6,6 +6,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 import threading
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -17,6 +18,11 @@ from nemoguardian.schemas import Mode, VerdictLabel
 DEFAULT_AUDIT_PATH = Path(
     os.environ.get("NEMOGUARDIAN_BOT_AUDIT_PATH", "/tmp/nemoguardian_bot_audit.jsonl")
 )
+
+_EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
+_SSN_RE = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
+_PHONE_RE = re.compile(r"(?<!\w)(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}(?!\w)")
+_PAYMENT_CARD_RE = re.compile(r"\b(?:\d[ -]*?){13,19}\b")
 
 
 @dataclass
@@ -122,8 +128,27 @@ def excerpt(text: str, limit: int = 500) -> str:
     return normalized[: limit - 1] + "..."
 
 
+def redact_text(text: str) -> str:
+    redacted = _EMAIL_RE.sub("[email]", text)
+    redacted = _SSN_RE.sub("[ssn]", redacted)
+    redacted = _PHONE_RE.sub("[phone]", redacted)
+    return _PAYMENT_CARD_RE.sub("[payment-card]", redacted)
+
+
+def redacted_excerpt(text: str, limit: int = 500) -> str:
+    return excerpt(redact_text(text), limit=limit)
+
+
 def text_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-__all__ = ["DEFAULT_AUDIT_PATH", "AuditLog", "AuditRecord", "excerpt", "text_hash"]
+__all__ = [
+    "DEFAULT_AUDIT_PATH",
+    "AuditLog",
+    "AuditRecord",
+    "excerpt",
+    "redact_text",
+    "redacted_excerpt",
+    "text_hash",
+]
