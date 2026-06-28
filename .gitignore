@@ -24,6 +24,7 @@ venv/
 htmlcov/
 demo-evidence*.json
 framework-evidence*.json
+bots.md
 
 # Editor / OS
 .vscode/
