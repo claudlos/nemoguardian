@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import runpy
 import sys
 from types import ModuleType, SimpleNamespace
 from typing import Any
@@ -302,6 +304,39 @@ def _install_fake_discord(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setitem(sys.modules, "discord.ext", ext_module)
     monkeypatch.setitem(sys.modules, "discord.ext.commands", commands_module)
     return FakeBot
+
+
+def _install_fake_twitch(monkeypatch: pytest.MonkeyPatch, events_to_run: list[Any]):
+    twitchio_module = ModuleType("twitchio")
+    ext_module = ModuleType("twitchio.ext")
+    commands_module = ModuleType("twitchio.ext.commands")
+    bots: list[Any] = []
+
+    class FakeTwitchBot:
+        def __init__(self, *, token: str, prefix: str, initial_channels: list[str]) -> None:
+            self.token = token
+            self.prefix = prefix
+            self.initial_channels = initial_channels
+            self.events: dict[str, Any] = {}
+            self.run_called = False
+            bots.append(self)
+
+        def event(self, func):
+            self.events[func.__name__] = func
+            return func
+
+        def run(self) -> None:
+            self.run_called = True
+            for message in events_to_run:
+                asyncio.run(self.events["event_message"](message))
+
+    commands_module.Bot = FakeTwitchBot
+    ext_module.commands = commands_module
+    twitchio_module.ext = ext_module
+    monkeypatch.setitem(sys.modules, "twitchio", twitchio_module)
+    monkeypatch.setitem(sys.modules, "twitchio.ext", ext_module)
+    monkeypatch.setitem(sys.modules, "twitchio.ext.commands", commands_module)
+    return bots
 
 
 async def test_discord_adapter_deletes_unsafe_message(tmp_path):
@@ -1496,6 +1531,69 @@ async def test_twitch_adapter_returns_delete_action(tmp_path):
     assert audit_log.recent()[0]["platform"] == "twitch"
 
 
+async def test_twitch_adapter_emits_skipped_message_without_audit(tmp_path):
+    config_store, audit_log = _stores(tmp_path)
+    config = BotConfig.default(Platform.TWITCH, "channel-1")
+    config.enabled = False
+    config_store.save(config)
+    cascade = FakeCascade(VerdictLabel.UNSAFE)
+    emitted: list[str] = []
+
+    action = await twitch.make_moderator(
+        cascade,
+        config_store=config_store,
+        audit_log=audit_log,
+        channel_id="channel-1",
+        emit=emitted.append,
+    )("drop your SSN", user_id="viewer-1", username="viewer")
+
+    assert action == "allow"
+    assert cascade.calls == []
+    assert audit_log.recent() == []
+    assert emitted == ["[twitch] allow: drop your SSN (skipped=disabled)"]
+
+
+def test_twitch_run_bot_requires_token(monkeypatch):
+    monkeypatch.delenv("TWITCH_TOKEN", raising=False)
+
+    with pytest.raises(RuntimeError, match="TWITCH_TOKEN env var required"):
+        twitch.run_bot("channel")
+
+
+def test_twitch_run_bot_registers_event_and_ignores_echo(monkeypatch):
+    messages = [
+        SimpleNamespace(echo=True, content="bot echo", author=SimpleNamespace(id="bot", name="bot")),
+        SimpleNamespace(echo=False, content="drop your SSN", author=SimpleNamespace(id="7", name="viewer")),
+    ]
+    bots = _install_fake_twitch(monkeypatch, messages)
+    calls: list[dict[str, str]] = []
+
+    async def fake_moderate(text: str, *, user_id: str, username: str) -> str:
+        calls.append({"text": text, "user_id": user_id, "username": username})
+        return "delete"
+
+    monkeypatch.setenv("TWITCH_TOKEN", "twitch-test-token")
+    monkeypatch.setattr(twitch, "make_moderator", lambda: fake_moderate)
+
+    twitch.run_bot("nemoguardian")
+
+    assert bots[0].token == "twitch-test-token"
+    assert bots[0].prefix == "!"
+    assert bots[0].initial_channels == ["nemoguardian"]
+    assert bots[0].run_called is True
+    assert calls == [{"text": "drop your SSN", "user_id": "7", "username": "viewer"}]
+
+
+def test_twitch_module_main_requires_channel(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["python -m nemoguardian.adapters.twitch"])
+
+    with pytest.warns(RuntimeWarning, match="found in sys.modules"), pytest.raises(SystemExit) as exc:
+        runpy.run_module("nemoguardian.adapters.twitch", run_name="__main__")
+
+    assert exc.value.code == 1
+    assert "usage: python -m nemoguardian.adapters.twitch <channel>" in capsys.readouterr().out
+
+
 class FakeHTTPResponse:
     def __init__(self, payload: dict[str, Any]) -> None:
         self.payload = payload
@@ -1534,6 +1632,58 @@ async def test_webhook_adapter_sends_env_api_key(monkeypatch):
     assert client.posts[0]["headers"] == {"Authorization": "Bearer nmg_env_key"}
     assert client.posts[0]["params"] == {"policy_preset": "discord"}
     assert client.posts[1]["json"] == {"text": "drop your SSN", "verdict": verdict}
+
+
+async def test_webhook_adapter_uses_default_http_clients_and_explicit_api_key(monkeypatch):
+    clients: list[Any] = []
+
+    class FakeContextHTTPClient:
+        def __init__(self, *, timeout: float) -> None:
+            self.timeout = timeout
+            self.posts: list[dict[str, Any]] = []
+            clients.append(self)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+        async def post(self, url: str, **kwargs: Any) -> FakeHTTPResponse:
+            self.posts.append({"url": url, **kwargs})
+            if url.endswith("/v1/moderate"):
+                return FakeHTTPResponse({"verdict": "safe", "score": 0.1})
+            return FakeHTTPResponse({"ok": True})
+
+    monkeypatch.setenv("NEMOGUARDIAN_API_KEY", "env-key")
+    monkeypatch.setattr(webhook.httpx, "AsyncClient", FakeContextHTTPClient)
+
+    verdict = await webhook.moderate_and_forward(
+        "hello",
+        forward_url="http://forward.test/hook",
+        moderator_url="http://moderator.test",
+        policy="block spam",
+        mode="fast",
+        api_key=" explicit-key ",
+    )
+
+    assert verdict == {"verdict": "safe", "score": 0.1}
+    assert [client.timeout for client in clients] == [30.0, 10.0]
+    assert clients[0].posts == [
+        {
+            "url": "http://moderator.test/v1/moderate",
+            "json": {"text": "hello", "policy": "block spam", "mode": "fast"},
+            "params": None,
+            "headers": {"Authorization": "Bearer explicit-key"},
+        }
+    ]
+    assert clients[1].posts == [
+        {
+            "url": "http://forward.test/hook",
+            "json": {"text": "hello", "verdict": verdict},
+        }
+    ]
+    assert webhook._auth_headers("   ") == {}
 
 
 def test_config_store_round_trips_platform_defaults(tmp_path):
