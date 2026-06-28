@@ -278,13 +278,20 @@ def revoke_api_key(customer_id: int, key_id: int) -> None:
     )
 
 
+def _api_key_from_row(row: sqlite3.Row) -> ApiKey:
+    data = dict(row)
+    data.pop("key_hash", None)
+    data["revoked"] = bool(data["revoked"])
+    return ApiKey(**data)
+
+
 def list_api_keys(customer_id: int) -> list[ApiKey]:
     conn = init_db()
     rows = conn.execute(
         "SELECT * FROM api_keys WHERE customer_id = ? ORDER BY id DESC",
         (customer_id,),
     ).fetchall()
-    return [ApiKey(**dict(r)) for r in rows]
+    return [_api_key_from_row(r) for r in rows]
 
 
 # --- Usage ----------------------------------------------------------------
