@@ -1476,6 +1476,22 @@ async def test_discord_build_bot_registers_and_runs_admin_commands(monkeypatch, 
     await group.commands["ignore_channel"](interaction, channel=SimpleNamespace(id=456), ignored=True)
     await group.commands["ignore_role"](interaction, role=SimpleNamespace(id=111), ignored=True)
     await group.commands["exempt_user"](interaction, user=SimpleNamespace(id=42), exempt=True)
+    audit_log.append(
+        AuditRecord(
+            case_id="foreign-case",
+            platform=Platform.TWITCH,
+            workspace_id="other-workspace",
+            channel_id="channel",
+            message_id="message",
+            user_id="viewer",
+            username="viewer",
+            action=ModerationAction.DELETE,
+            verdict=VerdictLabel.UNSAFE,
+            score=0.9,
+            mode=Mode.FAST,
+        )
+    )
+    await group.commands["case"](interaction, case_id="foreign-case")
     await group.commands["case"](interaction, case_id=" missing ")
     await group.commands["history"](interaction, limit=99, since_hours=-1)
     await group.commands["stats"](interaction, limit=999, since_hours=24 * 400)
@@ -1488,6 +1504,45 @@ async def test_discord_build_bot_registers_and_runs_admin_commands(monkeypatch, 
     await group.commands["rules"](interaction, limit=99, case_limit=9999, since_hours=2)
     await group.commands["categories"](interaction, limit=99, case_limit=9999, since_hours=2)
     await group.commands["test"](interaction, text="hello")
+
+    denied = FakeInteraction(manage_guild=False)
+    denied_calls = [
+        ("setup", {"log_channel": SimpleNamespace(id=999)}),
+        ("status", {}),
+        ("doctor", {}),
+        ("mode", {"mode": SimpleNamespace(value="deep")}),
+        ("policy", {"text": "blocked"}),
+        ("log_channel", {"channel": SimpleNamespace(id=444)}),
+        ("dry_run", {"enabled": False}),
+        ("enabled", {"enabled": True}),
+        (
+            "actions",
+            {
+                "delete_unsafe": True,
+                "public_warning": True,
+                "react_controversial": True,
+                "dm_users": False,
+            },
+        ),
+        ("timeout", {"enabled": False, "seconds": 120}),
+        ("ignore_channel", {"channel": SimpleNamespace(id=321), "ignored": False}),
+        ("ignore_role", {"role": SimpleNamespace(id=222), "ignored": False}),
+        ("exempt_user", {"user": SimpleNamespace(id=43), "exempt": False}),
+        ("case", {"case_id": "discord-123-789"}),
+        ("history", {"limit": 1, "since_hours": 1}),
+        ("stats", {"limit": 1, "since_hours": 1}),
+        ("failures", {"limit": 1, "since_hours": 1}),
+        ("dry_run_cases", {"limit": 1, "since_hours": 1}),
+        ("errors", {"limit": 1, "case_limit": 1, "since_hours": 1}),
+        ("slow_cases", {"limit": 1, "case_limit": 1, "since_hours": 1}),
+        ("offenders", {"limit": 1, "case_limit": 1, "since_hours": 1}),
+        ("channels", {"limit": 1, "case_limit": 1, "since_hours": 1}),
+        ("rules", {"limit": 1, "case_limit": 1, "since_hours": 1}),
+        ("categories", {"limit": 1, "case_limit": 1, "since_hours": 1}),
+        ("test", {"text": "denied"}),
+    ]
+    for command_name, kwargs in denied_calls:
+        await group.commands[command_name](denied, **kwargs)
 
     config = config_store.get(Platform.DISCORD, "123")
     assert bot.intents.guilds is True
@@ -1511,6 +1566,18 @@ async def test_discord_build_bot_registers_and_runs_admin_commands(monkeypatch, 
     assert config.exempt_user_ids == {"42"}
     assert recorded_tests[0][1] == "slash-test"
     assert any("nemoguardian test result" in message["text"] for message in interaction.response.messages)
+    assert len(denied.response.messages) == len(denied_calls)
+    assert all("Manage Server permission" in message["text"] for message in denied.response.messages)
+
+
+def test_discord_module_main_starts_fake_bot(monkeypatch):
+    _install_fake_discord(monkeypatch)
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "discord-test-token")
+
+    with pytest.warns(RuntimeWarning, match="found in sys.modules"):
+        namespace = runpy.run_module("nemoguardian.adapters.discord", run_name="__main__")
+
+    assert namespace["__name__"] == "__main__"
 
 
 async def test_twitch_adapter_returns_delete_action(tmp_path):
