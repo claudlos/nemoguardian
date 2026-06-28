@@ -418,6 +418,31 @@ def build_bot():
             ephemeral=True,
         )
 
+    @group.command(name="channels", description="Show channels with the most recent moderation cases.")
+    @app_commands.default_permissions(manage_guild=True)
+    async def channels(
+        interaction,
+        limit: int = 5,
+        case_limit: int = 500,
+        since_hours: float | None = None,
+    ) -> None:
+        if not await _require_manage_guild(interaction):
+            return
+        safe_limit = max(1, min(limit, 10))
+        safe_case_limit = max(1, min(case_limit, 1_000))
+        safe_since = _safe_since_hours(since_hours)
+        rows = audit_log.top_channels(
+            Platform.DISCORD,
+            str(interaction.guild_id),
+            limit=safe_limit,
+            case_limit=safe_case_limit,
+            since=since_hours_ago(safe_since),
+        )
+        await interaction.response.send_message(
+            _channels_text(rows, case_limit=safe_case_limit, since_hours=safe_since),
+            ephemeral=True,
+        )
+
     @group.command(name="test", description="Test a message against the current policy.")
     @app_commands.default_permissions(manage_guild=True)
     async def test(interaction, text: str) -> None:
@@ -742,6 +767,27 @@ def _offenders_text(
     for index, row in enumerate(rows, start=1):
         lines.append(
             f"{index}. user `{row.get('username', 'unknown')}` (`{row.get('user_id', 'unknown')}`) "
+            f"cases `{row.get('total', 0)}` unsafe `{row.get('unsafe', 0)}` "
+            f"controversial `{row.get('controversial', 0)}` "
+            f"actions `{_format_counts(row.get('actions') or {}, limit=3)}` "
+            f"latest `{row.get('latest_case_id') or 'none'}`"
+        )
+    return "\n".join(lines)
+
+
+def _channels_text(
+    rows: list[dict[str, Any]],
+    *,
+    case_limit: int,
+    since_hours: float | None = None,
+) -> str:
+    if not rows:
+        return f"**nemoguardian channels**{_window_text(since_hours)}\nNo moderated channels found."
+
+    lines = [f"**nemoguardian channels**{_window_text(since_hours)}\nlast `{case_limit}` cases"]
+    for index, row in enumerate(rows, start=1):
+        lines.append(
+            f"{index}. channel <#{row.get('channel_id', 'unknown')}> "
             f"cases `{row.get('total', 0)}` unsafe `{row.get('unsafe', 0)}` "
             f"controversial `{row.get('controversial', 0)}` "
             f"actions `{_format_counts(row.get('actions') or {}, limit=3)}` "

@@ -103,6 +103,19 @@ def test_bot_audit_cli_stats_history_and_offenders(tmp_path):
     assert offenders_body[0]["user_id"] == "42"
     assert offenders_body[0]["total"] == 2
 
+    channels = _run(
+        "bot-audit",
+        "channels",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+    )
+    assert channels.exit_code == 0
+    channels_body = json.loads(channels.stdout)
+    assert channels_body[0]["channel_id"] == "456"
+    assert channels_body[0]["total"] == 2
+
     windowed_stats = _run(
         "bot-audit",
         "stats",
@@ -145,6 +158,20 @@ def test_bot_audit_cli_stats_history_and_offenders(tmp_path):
     assert windowed_offenders.exit_code == 0
     windowed_offenders_body = json.loads(windowed_offenders.stdout)
     assert windowed_offenders_body[0]["total"] == 1
+
+    windowed_channels = _run(
+        "bot-audit",
+        "channels",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+        "--since-hours",
+        "1",
+    )
+    assert windowed_channels.exit_code == 0
+    windowed_channels_body = json.loads(windowed_channels.stdout)
+    assert windowed_channels_body[0]["total"] == 1
 
 
 def test_bot_audit_cli_case_lookup(tmp_path):

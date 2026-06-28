@@ -240,6 +240,7 @@ async def test_discord_build_bot_registers_slash_commands():
             "history",
             "stats",
             "offenders",
+            "channels",
             "test",
         }.issubset(command_names)
     finally:
@@ -297,6 +298,45 @@ async def test_discord_audit_top_users_orders_repeat_offenders(tmp_path):
     )
     assert discord._offenders_text([], case_limit=10, since_hours=2) == (
         "**nemoguardian offenders** (last 2h)\nNo moderated users found."
+    )
+
+
+async def test_discord_audit_top_channels_orders_hotspots(tmp_path):
+    config_store, audit_log = _stores(tmp_path)
+    first = FakeDiscordMessage("drop your SSN")
+    second = FakeDiscordMessage("another unsafe message")
+    second.id = 790
+    third = FakeDiscordMessage("borderline")
+    third.id = 791
+    third.channel = FakeChannel(888)
+
+    for message in (first, second):
+        await discord.make_handler(
+            FakeCascade(VerdictLabel.UNSAFE, categories=["PII"]),
+            config_store=config_store,
+            audit_log=audit_log,
+        )(message)
+    await discord.make_handler(
+        FakeCascade(VerdictLabel.CONTROVERSIAL, categories=["harassment"]),
+        config_store=config_store,
+        audit_log=audit_log,
+    )(third)
+
+    rows = audit_log.top_channels(Platform.DISCORD, "123", limit=5, case_limit=10)
+    text = discord._channels_text(rows, case_limit=10)
+
+    assert rows[0]["channel_id"] == "456"
+    assert rows[0]["total"] == 2
+    assert rows[0]["unsafe"] == 2
+    assert rows[1]["channel_id"] == "888"
+    assert "channel <#456>" in text
+    assert "delete:2" in text
+    assert "(last 2h)" in discord._channels_text(rows, case_limit=10, since_hours=2)
+    assert discord._channels_text([], case_limit=10) == (
+        "**nemoguardian channels**\nNo moderated channels found."
+    )
+    assert discord._channels_text([], case_limit=10, since_hours=2) == (
+        "**nemoguardian channels** (last 2h)\nNo moderated channels found."
     )
 
 

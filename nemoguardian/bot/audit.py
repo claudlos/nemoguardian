@@ -194,6 +194,54 @@ class AuditLog:
         rows.sort(key=lambda entry: (-entry["total"], -entry["unsafe"], entry["user_id"]))
         return rows[:limit]
 
+    def top_channels(
+        self,
+        platform: Platform | str,
+        workspace_id: str,
+        *,
+        limit: int = 10,
+        case_limit: int = 500,
+        since: dt.datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0 or case_limit <= 0:
+            return []
+        records = self.history(platform, workspace_id, limit=case_limit, since=since)
+        by_channel: dict[str, dict[str, Any]] = {}
+        for record in records:
+            channel_id = str(record.get("channel_id") or "unknown")
+            entry = by_channel.setdefault(
+                channel_id,
+                {
+                    "channel_id": channel_id,
+                    "total": 0,
+                    "unsafe": 0,
+                    "controversial": 0,
+                    "actions": Counter(),
+                    "categories": Counter(),
+                    "latest_case_id": record.get("case_id"),
+                    "latest_created_at": record.get("created_at"),
+                },
+            )
+            entry["total"] += 1
+            if record.get("verdict") == "unsafe":
+                entry["unsafe"] += 1
+            if record.get("verdict") == "controversial":
+                entry["controversial"] += 1
+            entry["actions"].update([str(record.get("action") or "unknown")])
+            entry["categories"].update(str(category) for category in record.get("categories") or [])
+
+        rows = []
+        for entry in by_channel.values():
+            rows.append(
+                {
+                    **entry,
+                    "actions": dict(entry["actions"]),
+                    "categories": dict(entry["categories"]),
+                }
+            )
+        rows.sort(key=lambda entry: (-entry["total"], -entry["unsafe"], entry["channel_id"]))
+        return rows[:limit]
+
     def _read_records(self) -> list[dict[str, Any]]:
         if not self.path.exists():
             return []

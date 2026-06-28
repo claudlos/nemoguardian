@@ -143,6 +143,26 @@ def audit_offenders(
     _echo_json(rows)
 
 
+@audit_app.command("channels")
+def audit_channels(
+    workspace_id: str = typer.Option(..., "--workspace-id", help="Platform workspace/guild/channel ID."),
+    platform: Platform = typer.Option(Platform.DISCORD, "--platform", help="Bot platform."),
+    limit: int = typer.Option(10, "--limit", min=1, max=50, help="Maximum channels to print."),
+    case_limit: int = typer.Option(500, "--case-limit", min=1, max=5_000, help="Recent cases to inspect."),
+    since_hours: float | None = typer.Option(None, "--since-hours", min=0.0, help="Only include newer cases."),
+    path: Path | None = typer.Option(None, "--path", help="Audit JSONL path."),
+) -> None:
+    """Print channels with the most recent moderation cases as JSON."""
+    rows = AuditLog(path).top_channels(
+        platform,
+        workspace_id,
+        limit=limit,
+        case_limit=case_limit,
+        since=since_hours_ago(since_hours),
+    )
+    _echo_json(rows)
+
+
 def _echo_json(payload: Any) -> None:
     typer.echo(json.dumps(payload, indent=2, sort_keys=True, default=str))
 
