@@ -94,6 +94,7 @@ class AuditLog:
         action: ModerationAction | str | None = None,
         verdict: VerdictLabel | str | None = None,
         status: str | None = None,
+        dry_run: bool | None = None,
         limit: int = 10,
         since: dt.datetime | None = None,
     ) -> list[dict[str, Any]]:
@@ -127,6 +128,8 @@ class AuditLog:
             if verdict_value is not None and not _record_field_matches(record, "verdict", verdict_value):
                 continue
             if status_value is not None and not _record_field_matches(record, "execution_status", status_value):
+                continue
+            if dry_run is not None and bool(record.get("dry_run")) != dry_run:
                 continue
             if since is not None and not _record_at_or_after(record, since):
                 continue
@@ -249,6 +252,7 @@ class AuditLog:
         action: ModerationAction | str | None = None,
         verdict: VerdictLabel | str | None = None,
         status: str | None = None,
+        dry_run: bool | None = None,
         limit: int = 100,
         since: dt.datetime | None = None,
     ) -> dict[str, Any]:
@@ -262,6 +266,7 @@ class AuditLog:
             action=action,
             verdict=verdict,
             status=status,
+            dry_run=dry_run,
             limit=limit,
             since=since,
         )
@@ -278,6 +283,7 @@ class AuditLog:
             "action": _filter_value(action),
             "verdict": _filter_value(verdict),
             "status": _filter_value(status),
+            "dry_run_filter": dry_run,
             "limit": max(0, limit),
             "since": since.isoformat() if since is not None else None,
             "total": len(records),

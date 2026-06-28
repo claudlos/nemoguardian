@@ -94,6 +94,7 @@ def audit_history(
     action: str | None = typer.Option(None, "--action", help="Optional moderation action filter."),
     verdict: str | None = typer.Option(None, "--verdict", help="Optional moderation verdict filter."),
     status: str | None = typer.Option(None, "--status", help="Optional execution status filter."),
+    dry_run: bool | None = typer.Option(None, "--dry-run/--live", help="Optional dry-run or live-case filter."),
     limit: int = typer.Option(10, "--limit", min=1, max=100, help="Maximum records to print."),
     since_hours: float | None = typer.Option(None, "--since-hours", min=0.0, help="Only include newer cases."),
     path: Path | None = typer.Option(None, "--path", help="Audit JSONL path."),
@@ -109,6 +110,7 @@ def audit_history(
         action=action,
         verdict=verdict,
         status=status,
+        dry_run=dry_run,
         limit=limit,
         since=since_hours_ago(since_hours),
     )
@@ -126,6 +128,7 @@ def audit_stats(
     action: str | None = typer.Option(None, "--action", help="Optional moderation action filter."),
     verdict: str | None = typer.Option(None, "--verdict", help="Optional moderation verdict filter."),
     status: str | None = typer.Option(None, "--status", help="Optional execution status filter."),
+    dry_run: bool | None = typer.Option(None, "--dry-run/--live", help="Optional dry-run or live-case filter."),
     limit: int = typer.Option(100, "--limit", min=1, max=1_000, help="Recent cases to summarize."),
     since_hours: float | None = typer.Option(None, "--since-hours", min=0.0, help="Only include newer cases."),
     path: Path | None = typer.Option(None, "--path", help="Audit JSONL path."),
@@ -141,6 +144,7 @@ def audit_stats(
         action=action,
         verdict=verdict,
         status=status,
+        dry_run=dry_run,
         limit=limit,
         since=since_hours_ago(since_hours),
     )

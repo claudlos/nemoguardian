@@ -362,6 +362,7 @@ def build_bot():
         action: str | None = None,
         verdict: str | None = None,
         status: str | None = None,
+        dry_run: bool | None = None,
         limit: int = 5,
         since_hours: float | None = None,
     ) -> None:
@@ -379,6 +380,7 @@ def build_bot():
             action=action,
             verdict=verdict,
             status=status,
+            dry_run=dry_run,
             limit=safe_limit,
             since=since_hours_ago(safe_since),
         )
@@ -395,6 +397,7 @@ def build_bot():
         action: str | None = None,
         verdict: str | None = None,
         status: str | None = None,
+        dry_run: bool | None = None,
         limit: int = 100,
         since_hours: float | None = None,
     ) -> None:
@@ -412,6 +415,7 @@ def build_bot():
             action=action,
             verdict=verdict,
             status=status,
+            dry_run=dry_run,
             limit=safe_limit,
             since=since_hours_ago(safe_since),
         )
@@ -881,11 +885,14 @@ def _stats_text(summary: dict[str, Any], *, since_hours: float | None = None) ->
     action_scope = f" action `{summary['action']}`" if summary.get("action") else ""
     verdict_scope = f" verdict `{summary['verdict']}`" if summary.get("verdict") else ""
     status_scope = f" status `{summary['status']}`" if summary.get("status") else ""
+    dry_run_scope = (
+        f" dry run `{summary['dry_run_filter']}`" if summary.get("dry_run_filter") is not None else ""
+    )
     return (
         f"**nemoguardian stats**{_window_text(since_hours)}\n"
         f"scope: `{summary.get('platform', 'unknown')}:{summary.get('workspace_id', 'unknown')}`"
         f"{user_scope}{channel_scope}{category_scope}{rule_scope}{action_scope}{verdict_scope}"
-        f"{status_scope} last `{summary.get('limit', 0)}` cases\n"
+        f"{status_scope}{dry_run_scope} last `{summary.get('limit', 0)}` cases\n"
         f"total cases: `{summary.get('total', 0)}` dry run: `{summary.get('dry_run', 0)}` "
         f"errors: `{summary.get('errors', 0)}`\n"
         f"verdicts: `{_format_counts(summary.get('verdicts') or {})}`\n"

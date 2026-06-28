@@ -277,6 +277,12 @@ async def test_discord_audit_summary_counts_recent_cases(tmp_path):
     assert "action `delete`" in enforcement_text
     assert "verdict `unsafe`" in enforcement_text
     assert "status `delete+public-warning`" in enforcement_text
+    live_summary = audit_log.summary(Platform.DISCORD, "123", dry_run=False, limit=10)
+    live_text = discord._stats_text(live_summary)
+    assert live_summary["dry_run_filter"] is False
+    assert live_summary["total"] == 2
+    assert live_summary["dry_run"] == 0
+    assert "dry run `False`" in live_text
     assert discord._stats_text(audit_log.summary(Platform.DISCORD, "missing")) == (
         "**nemoguardian stats**\nNo moderation cases found."
     )
@@ -403,12 +409,24 @@ async def test_discord_audit_dry_run_cases_filters_planned_actions(tmp_path):
     records = audit_log.dry_run_cases(Platform.DISCORD, "123", limit=5)
     text = discord._dry_run_cases_text(records)
     windowed = audit_log.dry_run_cases(Platform.DISCORD, "123", limit=5, since=since_hours_ago(1))
+    dry_run_history = audit_log.history(Platform.DISCORD, "123", dry_run=True, limit=5)
+    dry_run_summary = audit_log.summary(Platform.DISCORD, "123", dry_run=True, limit=10)
+    dry_run_text = discord._stats_text(dry_run_summary)
 
     assert [record["case_id"] for record in records] == [
         "discord-123-current-dry-run",
         "discord-123-old-dry-run",
     ]
     assert [record["case_id"] for record in windowed] == ["discord-123-current-dry-run"]
+    assert [record["case_id"] for record in dry_run_history] == [
+        "discord-123-allowed-dry-run",
+        "discord-123-current-dry-run",
+        "discord-123-old-dry-run",
+    ]
+    assert dry_run_summary["dry_run_filter"] is True
+    assert dry_run_summary["total"] == 3
+    assert dry_run_summary["dry_run"] == 3
+    assert "dry run `True`" in dry_run_text
     assert "timeout/unsafe" in text
     assert "categories `harassment`" in text
     assert "(last 2h)" in discord._dry_run_cases_text(records, since_hours=2)

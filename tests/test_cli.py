@@ -444,6 +444,67 @@ def test_bot_audit_cli_stats_history_and_offenders(tmp_path):
         "discord-123-current-dry-run"
     ]
 
+    dry_run_history = _run(
+        "bot-audit",
+        "history",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+        "--dry-run",
+    )
+    assert dry_run_history.exit_code == 0
+    assert [record["case_id"] for record in json.loads(dry_run_history.stdout)] == [
+        "discord-123-allowed-dry-run",
+        "discord-123-current-dry-run",
+        "discord-123-old-dry-run",
+    ]
+
+    dry_run_stats = _run(
+        "bot-audit",
+        "stats",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+        "--dry-run",
+    )
+    assert dry_run_stats.exit_code == 0
+    dry_run_stats_body = json.loads(dry_run_stats.stdout)
+    assert dry_run_stats_body["dry_run_filter"] is True
+    assert dry_run_stats_body["total"] == 3
+    assert dry_run_stats_body["dry_run"] == 3
+
+    live_history = _run(
+        "bot-audit",
+        "history",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+        "--live",
+    )
+    assert live_history.exit_code == 0
+    assert [record["case_id"] for record in json.loads(live_history.stdout)] == [
+        "discord-123-2",
+        "discord-123-1",
+    ]
+
+    live_stats = _run(
+        "bot-audit",
+        "stats",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+        "--live",
+    )
+    assert live_stats.exit_code == 0
+    live_stats_body = json.loads(live_stats.stdout)
+    assert live_stats_body["dry_run_filter"] is False
+    assert live_stats_body["total"] == 2
+    assert live_stats_body["dry_run"] == 0
+
     audit.append(
         AuditRecord(
             case_id="discord-123-old-failure",
