@@ -1,4 +1,4 @@
-.PHONY: install-dev lint test verify serve smoke smoke-deep demo-check framework-smoke pre-submit-local final-submission-check docker-build docker-run
+.PHONY: install-dev lint test verify serve smoke smoke-deep demo-check framework-smoke discord-live-smoke pre-submit-local final-submission-check docker-build docker-run
 
 PYTHON ?= .venv/bin/python
 PORT ?= 8000
@@ -7,6 +7,7 @@ DOCKER_BUILD_PROGRESS ?= plain
 DEMO_BASE_URL ?= http://localhost:8000
 DEMO_CHECK_FLAGS ?=
 FRAMEWORK_SMOKE_FLAGS ?=
+DISCORD_LIVE_SMOKE_FLAGS ?=
 FINAL_CHECK_FLAGS ?=
 
 install-dev:
@@ -36,6 +37,9 @@ demo-check:
 
 framework-smoke:
 	$(PYTHON) scripts/framework_smoke.py --base-url $(DEMO_BASE_URL) $(FRAMEWORK_SMOKE_FLAGS)
+
+discord-live-smoke:
+	$(PYTHON) scripts/discord_live_smoke.py $(DISCORD_LIVE_SMOKE_FLAGS)
 
 pre-submit-local:
 	$(PYTHON) scripts/pre_submit_local.py --image $(IMAGE)

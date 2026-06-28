@@ -47,7 +47,7 @@ def make_handler(
     )
 
     async def on_message(message) -> None:
-        if getattr(message.author, "bot", False):
+        if _should_ignore_author(message):
             return
         guild = getattr(message, "guild", None)
         if guild is None:
@@ -63,6 +63,19 @@ def make_handler(
         engine.record(evaluation, execution_status=status, error=error)
 
     return on_message
+
+
+def _should_ignore_author(message: Any) -> bool:
+    author = getattr(message, "author", None)
+    if not getattr(author, "bot", False):
+        return False
+    return str(getattr(author, "id", "")) not in _e2e_bot_author_ids()
+
+
+def _e2e_bot_author_ids() -> set[str]:
+    """Bot author IDs allowed only for live Discord smoke tests."""
+    raw = os.environ.get("NEMOGUARDIAN_DISCORD_E2E_BOT_AUTHOR_IDS", "")
+    return {part.strip() for part in raw.split(",") if part.strip()}
 
 
 async def apply_discord_actions(

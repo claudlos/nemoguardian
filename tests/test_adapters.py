@@ -1272,6 +1272,19 @@ async def test_discord_adapter_ignores_bot_messages(tmp_path):
     assert message.deleted is False
 
 
+async def test_discord_adapter_can_moderate_allowlisted_e2e_bot_author(monkeypatch, tmp_path):
+    config_store, audit_log = _stores(tmp_path)
+    monkeypatch.setenv("NEMOGUARDIAN_DISCORD_E2E_BOT_AUTHOR_IDS", "42, 100")
+    cascade = FakeCascade(VerdictLabel.UNSAFE, categories=["PII"])
+    message = FakeDiscordMessage("bot-authored smoke text", bot=True)
+
+    await discord.make_handler(cascade, config_store=config_store, audit_log=audit_log)(message)
+
+    assert message.deleted is True
+    assert cascade.calls[0]["text"] == "bot-authored smoke text"
+    assert audit_log.recent()[0]["execution_status"] == "delete+public-warning"
+
+
 async def test_discord_adapter_skips_configured_exclusions(tmp_path):
     scenarios = [
         ("ignored_channel_ids", "456", lambda message: None),

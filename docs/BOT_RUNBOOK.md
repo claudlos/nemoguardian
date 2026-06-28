@@ -78,6 +78,66 @@ nemoguardian discord-bot
 python -m nemoguardian.adapters.discord
 ```
 
+## Live E2E Smoke Loop
+
+For an automated build/fix loop against a real Discord server, use a private
+test server and two bot applications:
+
+- moderator bot - runs `nemoguardian`
+- sender bot - posts synthetic test messages into the test channel
+
+Do not use a Discord user token for automation. `nemoguardian` ignores
+bot-authored messages by default, so `scripts/discord_live_smoke.py` temporarily
+allowlists only the sender bot ID through
+`NEMOGUARDIAN_DISCORD_E2E_BOT_AUTHOR_IDS` after it fetches that ID from
+Discord. Keep that variable empty for normal production/community deployments.
+
+Recommended server channels:
+
+- `#nmg-test` - synthetic smoke messages
+- `#nmg-mod-log` - moderation logs
+- `#nmg-control` - slash-command setup and notes
+
+Store secrets outside the repo, for example:
+
+```bash
+mkdir -p ~/.config/nemoguardian
+chmod 700 ~/.config/nemoguardian
+$EDITOR ~/.config/nemoguardian/discord-live.env
+chmod 600 ~/.config/nemoguardian/discord-live.env
+```
+
+`~/.config/nemoguardian/discord-live.env`:
+
+```bash
+export DISCORD_BOT_TOKEN="<moderator-bot-token>"
+export DISCORD_TEST_SENDER_TOKEN="<sender-bot-token>"
+export DISCORD_GUILD_ID="<test-server-id>"
+export DISCORD_TEST_CHANNEL_ID="<nmg-test-channel-id>"
+export DISCORD_MOD_LOG_CHANNEL_ID="<nmg-mod-log-channel-id>"
+export NEMOGUARDIAN_BOT_CONFIG_PATH=/tmp/nemoguardian_discord_live_config.json
+export NEMOGUARDIAN_BOT_AUDIT_PATH=/tmp/nemoguardian_discord_live_audit.jsonl
+```
+
+First run dry-run mode:
+
+```bash
+source ~/.config/nemoguardian/discord-live.env
+make discord-live-smoke DISCORD_LIVE_SMOKE_FLAGS="--mode fast"
+```
+
+Then test real deletion once `/nemoguardian doctor` is clean and the bot has
+Manage Messages in `#nmg-test`:
+
+```bash
+make discord-live-smoke DISCORD_LIVE_SMOKE_FLAGS="--mode fast --enforce"
+```
+
+The script starts the moderator bot, pre-seeds guild config, sends one unsafe
+message through the sender bot, waits for the audit case, and prints JSON
+evidence including `case_id`, `execution_status`, `verdict`, and whether the
+message was deleted.
+
 ## Slash Commands
 
 Use these in a test server first:
