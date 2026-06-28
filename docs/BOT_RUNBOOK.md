@@ -102,6 +102,7 @@ Use these in a test server first:
 /nemoguardian offenders limit:5 case_limit:500 since_hours:24
 /nemoguardian channels limit:5 case_limit:500 since_hours:24
 /nemoguardian rules limit:5 case_limit:500 since_hours:24
+/nemoguardian categories limit:5 case_limit:500 since_hours:24
 /nemoguardian case case_id:discord-<guild-id>-<message-id>
 ```
 
@@ -118,11 +119,12 @@ server. It checks the current guild config, mod-log channel, requested Message
 Content intent, and the bot's effective channel permissions. `/nemoguardian
 history`, `/nemoguardian case`, `/nemoguardian stats`, `/nemoguardian
 failures`, `/nemoguardian offenders`, `/nemoguardian channels`, and
-`/nemoguardian rules` give moderators a quick way to inspect recent decisions,
-bot workload, failed enforcement, repeat offenders, hot channels, and noisy
-policy rules without reading the JSONL audit file directly. Use `channel` on
-history and stats to drill into a hotspot channel. Use `since_hours` on history,
-stats, failures, offenders, channels, and rules to narrow those views to a
+`/nemoguardian rules`, and `/nemoguardian categories` give moderators a quick
+way to inspect recent decisions, bot workload, failed enforcement, repeat
+offenders, hot channels, noisy policy rules, and noisy content categories
+without reading the JSONL audit file directly. Use `channel` on history and
+stats to drill into a hotspot channel. Use `since_hours` on history, stats,
+failures, offenders, channels, rules, and categories to narrow those views to a
 recent incident window.
 
 Use the ignore/exempt commands to keep moderation noise down in trusted or
@@ -172,6 +174,7 @@ nemoguardian bot-audit failures --workspace-id "$DISCORD_GUILD_ID" --since-hours
 nemoguardian bot-audit offenders --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit channels --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit rules --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+nemoguardian bot-audit categories --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit case discord-<guild-id>-<message-id> --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 ```
 

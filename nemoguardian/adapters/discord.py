@@ -494,6 +494,31 @@ def build_bot():
             ephemeral=True,
         )
 
+    @group.command(name="categories", description="Show moderation categories with the most recent cases.")
+    @app_commands.default_permissions(manage_guild=True)
+    async def categories(
+        interaction,
+        limit: int = 5,
+        case_limit: int = 500,
+        since_hours: float | None = None,
+    ) -> None:
+        if not await _require_manage_guild(interaction):
+            return
+        safe_limit = max(1, min(limit, 10))
+        safe_case_limit = max(1, min(case_limit, 1_000))
+        safe_since = _safe_since_hours(since_hours)
+        rows = audit_log.top_categories(
+            Platform.DISCORD,
+            str(interaction.guild_id),
+            limit=safe_limit,
+            case_limit=safe_case_limit,
+            since=since_hours_ago(safe_since),
+        )
+        await interaction.response.send_message(
+            _categories_text(rows, case_limit=safe_case_limit, since_hours=safe_since),
+            ephemeral=True,
+        )
+
     @group.command(name="test", description="Test a message against the current policy.")
     @app_commands.default_permissions(manage_guild=True)
     async def test(interaction, text: str) -> None:
@@ -884,6 +909,29 @@ def _rules_text(
             f"controversial `{row.get('controversial', 0)}` "
             f"actions `{_format_counts(row.get('actions') or {}, limit=3)}` "
             f"categories `{_format_counts(row.get('categories') or {}, limit=3)}` "
+            f"latest `{row.get('latest_case_id') or 'none'}`"
+        )
+    return "\n".join(lines)
+
+
+def _categories_text(
+    rows: list[dict[str, Any]],
+    *,
+    case_limit: int,
+    since_hours: float | None = None,
+) -> str:
+    if not rows:
+        return f"**nemoguardian categories**{_window_text(since_hours)}\nNo moderation categories found."
+
+    lines = [f"**nemoguardian categories**{_window_text(since_hours)}\nlast `{case_limit}` cases"]
+    for index, row in enumerate(rows, start=1):
+        category = str(row.get("category", "unknown")).replace("`", "'")[:64]
+        lines.append(
+            f"{index}. category `{category}` "
+            f"cases `{row.get('total', 0)}` unsafe `{row.get('unsafe', 0)}` "
+            f"controversial `{row.get('controversial', 0)}` "
+            f"actions `{_format_counts(row.get('actions') or {}, limit=3)}` "
+            f"rules `{_format_counts(row.get('rules') or {}, limit=3)}` "
             f"latest `{row.get('latest_case_id') or 'none'}`"
         )
     return "\n".join(lines)

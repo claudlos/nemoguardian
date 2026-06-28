@@ -67,8 +67,8 @@ Before presenting the bot as the product surface:
 - `docs/BOT_RUNBOOK.md` exists and lists Discord scopes, permissions, intents, and setup commands.
 - `DISCORD_BOT_TOKEN` is only supplied through the environment or a secret manager.
 - `NEMOGUARDIAN_BOT_CONFIG_PATH` and `NEMOGUARDIAN_BOT_AUDIT_PATH` point outside the repo for live runs.
-- Adapter tests cover unsafe delete, action toggles, controversial flag, bot-message ignore, configured exclusions, mod-log output, redacted evidence, case lookup, history, stats, channel drill-down, failure inspection, repeat-offender review, channel hotspot review, policy-rule hotspot review, Twitch action planning, and webhook auth.
-- CLI tests cover offline audit case lookup, history, stats, channel drill-down, failure inspection, repeat-offender JSON output, channel hotspot JSON output, policy-rule hotspot JSON output, and `since_hours` filters.
+- Adapter tests cover unsafe delete, action toggles, controversial flag, bot-message ignore, configured exclusions, mod-log output, redacted evidence, case lookup, history, stats, channel drill-down, failure inspection, repeat-offender review, channel hotspot review, policy-rule hotspot review, category hotspot review, Twitch action planning, and webhook auth.
+- CLI tests cover offline audit case lookup, history, stats, channel drill-down, failure inspection, repeat-offender JSON output, channel hotspot JSON output, policy-rule hotspot JSON output, category hotspot JSON output, and `since_hours` filters.
 - For a live Discord recording, install with `bot` + `applications.commands`, enable Message Content intent, and run `/nemoguardian setup` plus `/nemoguardian doctor` in a test server first.
 
 ## 5. GPU Demo Host

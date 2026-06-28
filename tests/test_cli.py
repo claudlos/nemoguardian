@@ -160,6 +160,19 @@ def test_bot_audit_cli_stats_history_and_offenders(tmp_path):
     assert rules_body[0]["rule"] == "block-pii"
     assert rules_body[0]["total"] == 1
 
+    categories = _run(
+        "bot-audit",
+        "categories",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+    )
+    assert categories.exit_code == 0
+    categories_body = json.loads(categories.stdout)
+    assert categories_body[0]["category"] == "PII"
+    assert categories_body[0]["total"] == 1
+
     windowed_stats = _run(
         "bot-audit",
         "stats",
@@ -231,6 +244,21 @@ def test_bot_audit_cli_stats_history_and_offenders(tmp_path):
     windowed_rules_body = json.loads(windowed_rules.stdout)
     assert windowed_rules_body[0]["rule"] == "watch-harassment"
     assert windowed_rules_body[0]["total"] == 1
+
+    windowed_categories = _run(
+        "bot-audit",
+        "categories",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+        "--since-hours",
+        "1",
+    )
+    assert windowed_categories.exit_code == 0
+    windowed_categories_body = json.loads(windowed_categories.stdout)
+    assert windowed_categories_body[0]["category"] == "harassment"
+    assert windowed_categories_body[0]["total"] == 1
 
     audit = AuditLog(path)
     audit.append(

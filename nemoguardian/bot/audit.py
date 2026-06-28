@@ -326,6 +326,56 @@ class AuditLog:
         rows.sort(key=lambda entry: (-entry["total"], -entry["unsafe"], entry["rule"]))
         return rows[:limit]
 
+    def top_categories(
+        self,
+        platform: Platform | str,
+        workspace_id: str,
+        *,
+        limit: int = 10,
+        case_limit: int = 500,
+        since: dt.datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0 or case_limit <= 0:
+            return []
+        records = self.history(platform, workspace_id, limit=case_limit, since=since)
+        by_category: dict[str, dict[str, Any]] = {}
+        for record in records:
+            categories = record.get("categories") or ["uncategorized"]
+            for category_value in categories:
+                category = str(category_value or "uncategorized")
+                entry = by_category.setdefault(
+                    category,
+                    {
+                        "category": category,
+                        "total": 0,
+                        "unsafe": 0,
+                        "controversial": 0,
+                        "actions": Counter(),
+                        "rules": Counter(),
+                        "latest_case_id": record.get("case_id"),
+                        "latest_created_at": record.get("created_at"),
+                    },
+                )
+                entry["total"] += 1
+                if record.get("verdict") == "unsafe":
+                    entry["unsafe"] += 1
+                if record.get("verdict") == "controversial":
+                    entry["controversial"] += 1
+                entry["actions"].update([str(record.get("action") or "unknown")])
+                entry["rules"].update([str(record.get("matched_policy_rule") or "unmatched")])
+
+        rows = []
+        for entry in by_category.values():
+            rows.append(
+                {
+                    **entry,
+                    "actions": dict(entry["actions"]),
+                    "rules": dict(entry["rules"]),
+                }
+            )
+        rows.sort(key=lambda entry: (-entry["total"], -entry["unsafe"], entry["category"]))
+        return rows[:limit]
+
     def _read_records(self) -> list[dict[str, Any]]:
         if not self.path.exists():
             return []

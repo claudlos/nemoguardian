@@ -325,6 +325,7 @@ async def test_discord_build_bot_registers_slash_commands():
             "offenders",
             "channels",
             "rules",
+            "categories",
             "test",
         }.issubset(command_names)
     finally:
@@ -468,6 +469,54 @@ async def test_discord_audit_top_rules_orders_policy_hotspots(tmp_path):
     )
     assert discord._rules_text([], case_limit=10, since_hours=2) == (
         "**nemoguardian rules** (last 2h)\nNo policy rules found."
+    )
+
+
+async def test_discord_audit_top_categories_orders_content_hotspots(tmp_path):
+    config_store, audit_log = _stores(tmp_path)
+    first = FakeDiscordMessage("drop your SSN")
+    second = FakeDiscordMessage("another unsafe message")
+    second.id = 790
+    third = FakeDiscordMessage("borderline")
+    third.id = 791
+
+    for message in (first, second):
+        await discord.make_handler(
+            FakeCascade(
+                VerdictLabel.UNSAFE,
+                categories=["PII"],
+                matched_policy_rule="block-pii",
+            ),
+            config_store=config_store,
+            audit_log=audit_log,
+        )(message)
+    await discord.make_handler(
+        FakeCascade(
+            VerdictLabel.CONTROVERSIAL,
+            categories=["harassment"],
+            matched_policy_rule="watch-harassment",
+        ),
+        config_store=config_store,
+        audit_log=audit_log,
+    )(third)
+
+    rows = audit_log.top_categories(Platform.DISCORD, "123", limit=5, case_limit=10)
+    text = discord._categories_text(rows, case_limit=10)
+
+    assert rows[0]["category"] == "PII"
+    assert rows[0]["total"] == 2
+    assert rows[0]["unsafe"] == 2
+    assert rows[0]["actions"] == {"delete": 2}
+    assert rows[0]["rules"] == {"block-pii": 2}
+    assert rows[1]["category"] == "harassment"
+    assert "category `PII`" in text
+    assert "rules `block-pii:2`" in text
+    assert "(last 2h)" in discord._categories_text(rows, case_limit=10, since_hours=2)
+    assert discord._categories_text([], case_limit=10) == (
+        "**nemoguardian categories**\nNo moderation categories found."
+    )
+    assert discord._categories_text([], case_limit=10, since_hours=2) == (
+        "**nemoguardian categories** (last 2h)\nNo moderation categories found."
     )
 
 

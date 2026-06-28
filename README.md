@@ -133,6 +133,7 @@ Initial server setup:
 /nemoguardian offenders limit:5 case_limit:500 since_hours:24
 /nemoguardian channels limit:5 case_limit:500 since_hours:24
 /nemoguardian rules limit:5 case_limit:500 since_hours:24
+/nemoguardian categories limit:5 case_limit:500 since_hours:24
 ```
 
 Offline audit inspection:
@@ -145,6 +146,7 @@ nemoguardian bot-audit failures --workspace-id "$DISCORD_GUILD_ID" --since-hours
 nemoguardian bot-audit offenders --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit channels --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit rules --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+nemoguardian bot-audit categories --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit case discord-<guild-id>-<message-id> --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 ```
 
