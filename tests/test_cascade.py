@@ -5,6 +5,7 @@ from __future__ import annotations
 import nemoguardian.cascade as cascade_module
 from nemoguardian.cascade import Cascade, CascadeConfig
 from nemoguardian.policy.nemoclaw import PolicyDecision
+from nemoguardian.policy.presets import get_preset
 from nemoguardian.schemas import Mode, ModelVerdict, ModerateRequest, VerdictLabel
 
 
@@ -299,6 +300,32 @@ def test_stream_document_verdict_scores_safe_and_controversial_tokens():
     assert verdict.score == 0.69
     assert verdict.model_id == "stream-test"
     assert verdict.reasoning == "Highest streaming token risk at token index 1."
+
+
+def test_fast_mode_policy_override_detects_text_pii_without_model_categories():
+    class PiiStream:
+        _loaded = True
+
+        def stream_classify(self, text: str):
+            yield "controversial", 0.95, 1
+
+    cascade = Cascade(CascadeConfig(qwen_stream_model="stream-test"))
+    cascade._qwen_stream = PiiStream()
+
+    result = cascade.moderate(
+        ModerateRequest(
+            text="Hey everyone, my SSN is 123-45-6789.",
+            policy="block PII",
+            mode=Mode.FAST,
+        ),
+        policy_engine=get_preset("discord"),
+    )
+
+    assert result.verdict == VerdictLabel.UNSAFE
+    assert result.score == 1.0
+    assert result.categories == ["PII"]
+    assert result.matched_policy_rule == "force-block-pii"
+    assert any("Detected PII pattern" in reason for reason in result.reasons)
 
 
 def test_stream_document_verdict_handles_empty_stream():

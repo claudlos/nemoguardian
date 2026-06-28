@@ -127,6 +127,9 @@ class FakeTokenClassificationModel:
 def _install_fake_torch(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     torch_module = ModuleType("torch")
     torch_module.float16 = "float16"
+    torch_module.float32 = "float32"
+    torch_module.bfloat16 = "bfloat16"
+    torch_module.cuda = SimpleNamespace(is_available=lambda: False)
     torch_module.no_grad = FakeNoGrad
     torch_module.softmax = lambda _logits, dim: FakeProbBatch(
         [[0.05, 0.10, 0.85], [0.80, 0.15, 0.05], [0.15, 0.70, 0.15]]
@@ -310,7 +313,7 @@ def test_qwen_stream_classifies_fake_token_logits(monkeypatch):
     assert rows == [("unsafe", 0.85, 0), ("safe", 0.8, 1), ("controversial", 0.7, 2)]
     assert stream._loaded is True
     assert calls["token_model_name"] == "fake-stream"
-    assert calls["token_kwargs"] == [{"torch_dtype": "auto", "device_map": "auto"}]
+    assert calls["token_kwargs"] == [{"torch_dtype": "float32", "device_map": "auto"}]
     assert calls["token_model"].eval_called is True
     assert calls["tokenizer"].calls[0]["value"] == "abc"
     assert calls["tokenizer"].calls[0]["truncation"] is True

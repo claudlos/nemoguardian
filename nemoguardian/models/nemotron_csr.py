@@ -16,6 +16,7 @@ import re
 from typing import Any
 
 from nemoguardian.models.base import ModerationModel
+from nemoguardian.models.torch_runtime import runtime_torch_dtype
 from nemoguardian.schemas import VerdictLabel
 
 _PROMPT_HARM_RE = re.compile(r"Prompt harm: (harmful|unharmful)")
@@ -76,7 +77,7 @@ class NemotronCSR(ModerationModel):
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
-        kwargs: dict[str, Any] = {"torch_dtype": "auto", "device_map": "auto"}
+        kwargs: dict[str, Any] = {"torch_dtype": runtime_torch_dtype(torch), "device_map": "auto"}
         if self.load_in_4bit:
             from transformers import BitsAndBytesConfig
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -25,6 +26,11 @@ from nemoguardian.schemas import (
     ModerateResponse,
     VerdictLabel,
 )
+
+_EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
+_SSN_RE = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
+_PHONE_RE = re.compile(r"(?<!\w)(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}(?!\w)")
+_PAYMENT_CARD_RE = re.compile(r"\b(?:\d[ -]*?){13,19}\b")
 
 
 @dataclass
@@ -174,6 +180,10 @@ class Cascade:
             )
 
         aggregated: AggregatedVerdict = aggregate(model_verdicts)
+        for category in _text_policy_categories(request.text):
+            if category not in aggregated.categories:
+                aggregated.categories.append(category)
+                aggregated.reasons.append(f"[NemoClaw] Detected {category} pattern in message text.")
 
         # NemoClaw policy gate
         matched_rule: str | None = None
@@ -235,6 +245,12 @@ class Cascade:
             reasoning=f"Highest streaming token risk at token index {best_idx}.",
             latency_ms=round((time.perf_counter() - start) * 1000.0, 2),
         )
+
+
+def _text_policy_categories(text: str) -> list[str]:
+    if _SSN_RE.search(text) or _EMAIL_RE.search(text) or _PHONE_RE.search(text) or _PAYMENT_CARD_RE.search(text):
+        return ["PII"]
+    return []
 
 
 def _env_bool(name: str, default: bool) -> bool:
