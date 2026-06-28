@@ -358,6 +358,7 @@ def build_bot():
         user: discord.Member | None = None,
         channel: discord.TextChannel | None = None,
         category: str | None = None,
+        rule: str | None = None,
         limit: int = 5,
         since_hours: float | None = None,
     ) -> None:
@@ -371,6 +372,7 @@ def build_bot():
             user_id=str(user.id) if user is not None else None,
             channel_id=str(channel.id) if channel is not None else None,
             category=category,
+            rule=rule,
             limit=safe_limit,
             since=since_hours_ago(safe_since),
         )
@@ -383,6 +385,7 @@ def build_bot():
         user: discord.Member | None = None,
         channel: discord.TextChannel | None = None,
         category: str | None = None,
+        rule: str | None = None,
         limit: int = 100,
         since_hours: float | None = None,
     ) -> None:
@@ -396,6 +399,7 @@ def build_bot():
             user_id=str(user.id) if user is not None else None,
             channel_id=str(channel.id) if channel is not None else None,
             category=category,
+            rule=rule,
             limit=safe_limit,
             since=since_hours_ago(safe_since),
         )
@@ -861,10 +865,11 @@ def _stats_text(summary: dict[str, Any], *, since_hours: float | None = None) ->
     user_scope = f" user `{summary['user_id']}`" if summary.get("user_id") else ""
     channel_scope = f" channel <#{summary['channel_id']}>" if summary.get("channel_id") else ""
     category_scope = f" category `{summary['category']}`" if summary.get("category") else ""
+    rule_scope = f" rule `{summary['rule']}`" if summary.get("rule") else ""
     return (
         f"**nemoguardian stats**{_window_text(since_hours)}\n"
         f"scope: `{summary.get('platform', 'unknown')}:{summary.get('workspace_id', 'unknown')}`"
-        f"{user_scope}{channel_scope}{category_scope} last `{summary.get('limit', 0)}` cases\n"
+        f"{user_scope}{channel_scope}{category_scope}{rule_scope} last `{summary.get('limit', 0)}` cases\n"
         f"total cases: `{summary.get('total', 0)}` dry run: `{summary.get('dry_run', 0)}` "
         f"errors: `{summary.get('errors', 0)}`\n"
         f"verdicts: `{_format_counts(summary.get('verdicts') or {})}`\n"

@@ -90,6 +90,7 @@ class AuditLog:
         user_id: str | None = None,
         channel_id: str | None = None,
         category: str | None = None,
+        rule: str | None = None,
         limit: int = 10,
         since: dt.datetime | None = None,
     ) -> list[dict[str, Any]]:
@@ -100,6 +101,7 @@ class AuditLog:
         user_value = str(user_id) if user_id is not None else None
         channel_value = str(channel_id) if channel_id is not None else None
         category_value = str(category) if category is not None else None
+        rule_value = str(rule) if rule is not None else None
         matches = []
         for record in reversed(self._read_records()):
             if record.get("platform") != platform_value:
@@ -111,6 +113,8 @@ class AuditLog:
             if channel_value is not None and str(record.get("channel_id")) != channel_value:
                 continue
             if category_value is not None and not _record_has_category(record, category_value):
+                continue
+            if rule_value is not None and not _record_matches_rule(record, rule_value):
                 continue
             if since is not None and not _record_at_or_after(record, since):
                 continue
@@ -229,6 +233,7 @@ class AuditLog:
         user_id: str | None = None,
         channel_id: str | None = None,
         category: str | None = None,
+        rule: str | None = None,
         limit: int = 100,
         since: dt.datetime | None = None,
     ) -> dict[str, Any]:
@@ -238,6 +243,7 @@ class AuditLog:
             user_id=user_id,
             channel_id=channel_id,
             category=category,
+            rule=rule,
             limit=limit,
             since=since,
         )
@@ -250,6 +256,7 @@ class AuditLog:
             "user_id": str(user_id) if user_id is not None else None,
             "channel_id": str(channel_id) if channel_id is not None else None,
             "category": str(category) if category is not None else None,
+            "rule": str(rule) if rule is not None else None,
             "limit": max(0, limit),
             "since": since.isoformat() if since is not None else None,
             "total": len(records),
@@ -532,6 +539,10 @@ def _is_dry_run_action_record(record: dict[str, Any]) -> bool:
 
 def _record_has_category(record: dict[str, Any], category: str) -> bool:
     return category in {str(value) for value in record.get("categories") or []}
+
+
+def _record_matches_rule(record: dict[str, Any], rule: str) -> bool:
+    return str(record.get("matched_policy_rule") or "unmatched") == rule
 
 
 def _record_errors(record: dict[str, Any]) -> list[str]:

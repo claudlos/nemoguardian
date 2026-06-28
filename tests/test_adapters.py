@@ -202,12 +202,16 @@ async def test_discord_audit_summary_counts_recent_cases(tmp_path):
     controversial_message.channel = FakeChannel(888)
 
     await discord.make_handler(
-        FakeCascade(VerdictLabel.UNSAFE, categories=["PII"]),
+        FakeCascade(VerdictLabel.UNSAFE, categories=["PII"], matched_policy_rule="block-pii"),
         config_store=config_store,
         audit_log=audit_log,
     )(unsafe_message)
     await discord.make_handler(
-        FakeCascade(VerdictLabel.CONTROVERSIAL, categories=["harassment"]),
+        FakeCascade(
+            VerdictLabel.CONTROVERSIAL,
+            categories=["harassment"],
+            matched_policy_rule="watch-harassment",
+        ),
         config_store=config_store,
         audit_log=audit_log,
     )(controversial_message)
@@ -239,6 +243,14 @@ async def test_discord_audit_summary_counts_recent_cases(tmp_path):
     assert category_summary["total"] == 1
     assert category_summary["actions"] == {"flag": 1}
     assert "category `harassment`" in category_text
+    rule_history = audit_log.history(Platform.DISCORD, "123", rule="watch-harassment", limit=5)
+    rule_summary = audit_log.summary(Platform.DISCORD, "123", rule="watch-harassment", limit=10)
+    rule_text = discord._stats_text(rule_summary)
+    assert [record["case_id"] for record in rule_history] == [audit_log.recent()[-1]["case_id"]]
+    assert rule_summary["rule"] == "watch-harassment"
+    assert rule_summary["total"] == 1
+    assert rule_summary["actions"] == {"flag": 1}
+    assert "rule `watch-harassment`" in rule_text
     assert discord._stats_text(audit_log.summary(Platform.DISCORD, "missing")) == (
         "**nemoguardian stats**\nNo moderation cases found."
     )
