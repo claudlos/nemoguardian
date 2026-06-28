@@ -13,7 +13,7 @@ from typing import Any
 
 import typer
 
-from nemoguardian.bot import AuditLog, Platform
+from nemoguardian.bot import AuditLog, Platform, since_hours_ago
 from nemoguardian.cascade import Cascade, CascadeConfig
 from nemoguardian.policy.presets import get_preset
 from nemoguardian.schemas import Mode, ModerateRequest
@@ -89,10 +89,17 @@ def audit_history(
     platform: Platform = typer.Option(Platform.DISCORD, "--platform", help="Bot platform."),
     user_id: str | None = typer.Option(None, "--user-id", help="Optional user ID filter."),
     limit: int = typer.Option(10, "--limit", min=1, max=100, help="Maximum records to print."),
+    since_hours: float | None = typer.Option(None, "--since-hours", min=0.0, help="Only include newer cases."),
     path: Path | None = typer.Option(None, "--path", help="Audit JSONL path."),
 ) -> None:
     """Print recent audit cases as JSON."""
-    records = AuditLog(path).history(platform, workspace_id, user_id=user_id, limit=limit)
+    records = AuditLog(path).history(
+        platform,
+        workspace_id,
+        user_id=user_id,
+        limit=limit,
+        since=since_hours_ago(since_hours),
+    )
     _echo_json(records)
 
 
@@ -102,10 +109,17 @@ def audit_stats(
     platform: Platform = typer.Option(Platform.DISCORD, "--platform", help="Bot platform."),
     user_id: str | None = typer.Option(None, "--user-id", help="Optional user ID filter."),
     limit: int = typer.Option(100, "--limit", min=1, max=1_000, help="Recent cases to summarize."),
+    since_hours: float | None = typer.Option(None, "--since-hours", min=0.0, help="Only include newer cases."),
     path: Path | None = typer.Option(None, "--path", help="Audit JSONL path."),
 ) -> None:
     """Print audit case counts as JSON."""
-    summary = AuditLog(path).summary(platform, workspace_id, user_id=user_id, limit=limit)
+    summary = AuditLog(path).summary(
+        platform,
+        workspace_id,
+        user_id=user_id,
+        limit=limit,
+        since=since_hours_ago(since_hours),
+    )
     _echo_json(summary)
 
 
@@ -115,10 +129,17 @@ def audit_offenders(
     platform: Platform = typer.Option(Platform.DISCORD, "--platform", help="Bot platform."),
     limit: int = typer.Option(10, "--limit", min=1, max=50, help="Maximum users to print."),
     case_limit: int = typer.Option(500, "--case-limit", min=1, max=5_000, help="Recent cases to inspect."),
+    since_hours: float | None = typer.Option(None, "--since-hours", min=0.0, help="Only include newer cases."),
     path: Path | None = typer.Option(None, "--path", help="Audit JSONL path."),
 ) -> None:
     """Print users with the most recent moderation cases as JSON."""
-    rows = AuditLog(path).top_users(platform, workspace_id, limit=limit, case_limit=case_limit)
+    rows = AuditLog(path).top_users(
+        platform,
+        workspace_id,
+        limit=limit,
+        case_limit=case_limit,
+        since=since_hours_ago(since_hours),
+    )
     _echo_json(rows)
 
 

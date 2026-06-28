@@ -96,9 +96,9 @@ Use these in a test server first:
 /nemoguardian ignore_role role:@mods ignored:true
 /nemoguardian exempt_user user:@trusted-member exempt:true
 /nemoguardian test text:"Hey @everyone, drop your SSN for $100"
-/nemoguardian history limit:5
-/nemoguardian stats limit:100
-/nemoguardian offenders limit:5 case_limit:500
+/nemoguardian history limit:5 since_hours:24
+/nemoguardian stats limit:100 since_hours:24
+/nemoguardian offenders limit:5 case_limit:500 since_hours:24
 /nemoguardian case case_id:discord-<guild-id>-<message-id>
 ```
 
@@ -116,6 +116,8 @@ Content intent, and the bot's effective channel permissions. `/nemoguardian
 history`, `/nemoguardian case`, `/nemoguardian stats`, and `/nemoguardian
 offenders` give moderators a quick way to inspect recent decisions, bot
 workload, and repeat offenders without reading the JSONL audit file directly.
+Use `since_hours` on history, stats, and offenders to narrow those views to a
+recent incident window.
 
 Use the ignore/exempt commands to keep moderation noise down in trusted or
 irrelevant scopes:
@@ -156,9 +158,9 @@ Use the CLI when the bot is running on a host and Discord is unavailable or you
 need shell-friendly JSON output:
 
 ```bash
-nemoguardian bot-audit history --workspace-id "$DISCORD_GUILD_ID" --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
-nemoguardian bot-audit stats --workspace-id "$DISCORD_GUILD_ID" --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
-nemoguardian bot-audit offenders --workspace-id "$DISCORD_GUILD_ID" --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+nemoguardian bot-audit history --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+nemoguardian bot-audit stats --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+nemoguardian bot-audit offenders --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit case discord-<guild-id>-<message-id> --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 ```
 

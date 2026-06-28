@@ -31,6 +31,7 @@ def _seed_audit(tmp_path):
             mode=Mode.STANDARD,
             categories=["PII"],
             execution_status="delete+public-warning",
+            created_at="2000-01-01T00:00:00+00:00",
         )
     )
     audit.append(
@@ -101,6 +102,49 @@ def test_bot_audit_cli_stats_history_and_offenders(tmp_path):
     offenders_body = json.loads(offenders.stdout)
     assert offenders_body[0]["user_id"] == "42"
     assert offenders_body[0]["total"] == 2
+
+    windowed_stats = _run(
+        "bot-audit",
+        "stats",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+        "--since-hours",
+        "1",
+    )
+    assert windowed_stats.exit_code == 0
+    windowed_stats_body = json.loads(windowed_stats.stdout)
+    assert windowed_stats_body["total"] == 1
+    assert windowed_stats_body["verdicts"] == {"controversial": 1}
+    assert windowed_stats_body["since"] is not None
+
+    windowed_history = _run(
+        "bot-audit",
+        "history",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+        "--since-hours",
+        "1",
+    )
+    assert windowed_history.exit_code == 0
+    assert [record["case_id"] for record in json.loads(windowed_history.stdout)] == ["discord-123-2"]
+
+    windowed_offenders = _run(
+        "bot-audit",
+        "offenders",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+        "--since-hours",
+        "1",
+    )
+    assert windowed_offenders.exit_code == 0
+    windowed_offenders_body = json.loads(windowed_offenders.stdout)
+    assert windowed_offenders_body[0]["total"] == 1
 
 
 def test_bot_audit_cli_case_lookup(tmp_path):

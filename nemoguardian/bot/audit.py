@@ -89,6 +89,7 @@ class AuditLog:
         *,
         user_id: str | None = None,
         limit: int = 10,
+        since: dt.datetime | None = None,
     ) -> list[dict[str, Any]]:
         if limit <= 0:
             return []
@@ -103,6 +104,8 @@ class AuditLog:
                 continue
             if user_value is not None and str(record.get("user_id")) != user_value:
                 continue
+            if since is not None and not _record_at_or_after(record, since):
+                continue
             matches.append(record)
             if len(matches) >= limit:
                 break
@@ -115,8 +118,9 @@ class AuditLog:
         *,
         user_id: str | None = None,
         limit: int = 100,
+        since: dt.datetime | None = None,
     ) -> dict[str, Any]:
-        records = self.history(platform, workspace_id, user_id=user_id, limit=limit)
+        records = self.history(platform, workspace_id, user_id=user_id, limit=limit, since=since)
         category_counts: Counter[str] = Counter()
         for record in records:
             category_counts.update(str(category) for category in record.get("categories") or [])
@@ -125,6 +129,7 @@ class AuditLog:
             "workspace_id": str(workspace_id),
             "user_id": str(user_id) if user_id is not None else None,
             "limit": max(0, limit),
+            "since": since.isoformat() if since is not None else None,
             "total": len(records),
             "verdicts": dict(_count_field(records, "verdict")),
             "actions": dict(_count_field(records, "action")),
@@ -147,10 +152,11 @@ class AuditLog:
         *,
         limit: int = 10,
         case_limit: int = 500,
+        since: dt.datetime | None = None,
     ) -> list[dict[str, Any]]:
         if limit <= 0 or case_limit <= 0:
             return []
-        records = self.history(platform, workspace_id, limit=case_limit)
+        records = self.history(platform, workspace_id, limit=case_limit, since=since)
         by_user: dict[str, dict[str, Any]] = {}
         for record in records:
             user_id = str(record.get("user_id") or "unknown")
@@ -220,6 +226,34 @@ def redacted_excerpt(text: str, limit: int = 500) -> str:
     return excerpt(redact_text(text), limit=limit)
 
 
+def since_hours_ago(hours: float | int | None, *, now: dt.datetime | None = None) -> dt.datetime | None:
+    if hours is None:
+        return None
+    now = _ensure_aware(now or dt.datetime.now(dt.timezone.utc))
+    return now - dt.timedelta(hours=float(hours))
+
+
+def _record_at_or_after(record: dict[str, Any], since: dt.datetime) -> bool:
+    created_at = _parse_created_at(record.get("created_at"))
+    return created_at is not None and created_at >= _ensure_aware(since)
+
+
+def _parse_created_at(value: Any) -> dt.datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return _ensure_aware(parsed)
+
+
+def _ensure_aware(value: dt.datetime) -> dt.datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=dt.timezone.utc)
+    return value.astimezone(dt.timezone.utc)
+
+
 def _count_field(records: list[dict[str, Any]], field_name: str) -> Counter[str]:
     return Counter(str(record.get(field_name) or "unknown") for record in records)
 
@@ -235,5 +269,6 @@ __all__ = [
     "excerpt",
     "redact_text",
     "redacted_excerpt",
+    "since_hours_ago",
     "text_hash",
 ]

@@ -23,6 +23,7 @@ from nemoguardian.bot import (
     ModerationEvaluation,
     Platform,
     redacted_excerpt,
+    since_hours_ago,
 )
 from nemoguardian.bot.types import ModerationAction
 from nemoguardian.cascade import Cascade
@@ -352,47 +353,68 @@ def build_bot():
 
     @group.command(name="history", description="Show recent moderation cases for this server or user.")
     @app_commands.default_permissions(manage_guild=True)
-    async def history(interaction, user: discord.Member | None = None, limit: int = 5) -> None:
+    async def history(
+        interaction,
+        user: discord.Member | None = None,
+        limit: int = 5,
+        since_hours: float | None = None,
+    ) -> None:
         if not await _require_manage_guild(interaction):
             return
         safe_limit = max(1, min(limit, 10))
+        safe_since = _safe_since_hours(since_hours)
         records = audit_log.history(
             Platform.DISCORD,
             str(interaction.guild_id),
             user_id=str(user.id) if user is not None else None,
             limit=safe_limit,
+            since=since_hours_ago(safe_since),
         )
-        await interaction.response.send_message(_history_text(records), ephemeral=True)
+        await interaction.response.send_message(_history_text(records, since_hours=safe_since), ephemeral=True)
 
     @group.command(name="stats", description="Summarize recent moderation cases.")
     @app_commands.default_permissions(manage_guild=True)
-    async def stats(interaction, user: discord.Member | None = None, limit: int = 100) -> None:
+    async def stats(
+        interaction,
+        user: discord.Member | None = None,
+        limit: int = 100,
+        since_hours: float | None = None,
+    ) -> None:
         if not await _require_manage_guild(interaction):
             return
         safe_limit = max(1, min(limit, 500))
+        safe_since = _safe_since_hours(since_hours)
         summary = audit_log.summary(
             Platform.DISCORD,
             str(interaction.guild_id),
             user_id=str(user.id) if user is not None else None,
             limit=safe_limit,
+            since=since_hours_ago(safe_since),
         )
-        await interaction.response.send_message(_stats_text(summary), ephemeral=True)
+        await interaction.response.send_message(_stats_text(summary, since_hours=safe_since), ephemeral=True)
 
     @group.command(name="offenders", description="Show users with the most recent moderation cases.")
     @app_commands.default_permissions(manage_guild=True)
-    async def offenders(interaction, limit: int = 5, case_limit: int = 500) -> None:
+    async def offenders(
+        interaction,
+        limit: int = 5,
+        case_limit: int = 500,
+        since_hours: float | None = None,
+    ) -> None:
         if not await _require_manage_guild(interaction):
             return
         safe_limit = max(1, min(limit, 10))
         safe_case_limit = max(1, min(case_limit, 1_000))
+        safe_since = _safe_since_hours(since_hours)
         rows = audit_log.top_users(
             Platform.DISCORD,
             str(interaction.guild_id),
             limit=safe_limit,
             case_limit=safe_case_limit,
+            since=since_hours_ago(safe_since),
         )
         await interaction.response.send_message(
-            _offenders_text(rows, case_limit=safe_case_limit),
+            _offenders_text(rows, case_limit=safe_case_limit, since_hours=safe_since),
             ephemeral=True,
         )
 
@@ -663,11 +685,11 @@ def _case_text(record: dict[str, Any] | None) -> str:
     return "\n".join(lines)
 
 
-def _history_text(records: list[dict[str, Any]]) -> str:
+def _history_text(records: list[dict[str, Any]], *, since_hours: float | None = None) -> str:
     if not records:
-        return "No moderation history found."
+        return f"No moderation history found{_window_text(since_hours)}."
 
-    lines = ["**nemoguardian history**"]
+    lines = [f"**nemoguardian history**{_window_text(since_hours)}"]
     for record in records[:10]:
         lines.append(
             f"`{record.get('case_id', 'unknown')}` "
@@ -680,13 +702,13 @@ def _history_text(records: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _stats_text(summary: dict[str, Any]) -> str:
+def _stats_text(summary: dict[str, Any], *, since_hours: float | None = None) -> str:
     if int(summary.get("total") or 0) <= 0:
-        return "**nemoguardian stats**\nNo moderation cases found."
+        return f"**nemoguardian stats**{_window_text(since_hours)}\nNo moderation cases found."
 
     user_scope = f" user `{summary['user_id']}`" if summary.get("user_id") else ""
     return (
-        "**nemoguardian stats**\n"
+        f"**nemoguardian stats**{_window_text(since_hours)}\n"
         f"scope: `{summary.get('platform', 'unknown')}:{summary.get('workspace_id', 'unknown')}`"
         f"{user_scope} last `{summary.get('limit', 0)}` cases\n"
         f"total cases: `{summary.get('total', 0)}` dry run: `{summary.get('dry_run', 0)}` "
@@ -707,11 +729,16 @@ def _format_counts(counts: dict[str, int], limit: int = 8) -> str:
     return ", ".join(f"{name}:{count}" for name, count in items)
 
 
-def _offenders_text(rows: list[dict[str, Any]], *, case_limit: int) -> str:
+def _offenders_text(
+    rows: list[dict[str, Any]],
+    *,
+    case_limit: int,
+    since_hours: float | None = None,
+) -> str:
     if not rows:
-        return "**nemoguardian offenders**\nNo moderated users found."
+        return f"**nemoguardian offenders**{_window_text(since_hours)}\nNo moderated users found."
 
-    lines = [f"**nemoguardian offenders**\nlast `{case_limit}` cases"]
+    lines = [f"**nemoguardian offenders**{_window_text(since_hours)}\nlast `{case_limit}` cases"]
     for index, row in enumerate(rows, start=1):
         lines.append(
             f"{index}. user `{row.get('username', 'unknown')}` (`{row.get('user_id', 'unknown')}`) "
@@ -721,6 +748,22 @@ def _offenders_text(rows: list[dict[str, Any]], *, case_limit: int) -> str:
             f"latest `{row.get('latest_case_id') or 'none'}`"
         )
     return "\n".join(lines)
+
+
+def _safe_since_hours(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return max(0.0, min(float(value), 24 * 365))
+
+
+def _window_text(since_hours: float | None) -> str:
+    if since_hours is None:
+        return ""
+    return f" (last {_format_hours(since_hours)})"
+
+
+def _format_hours(hours: float) -> str:
+    return f"{hours:g}h"
 
 
 def _format_score(value: Any) -> str:

@@ -206,8 +206,12 @@ async def test_discord_audit_summary_counts_recent_cases(tmp_path):
     assert "total cases: `2`" in text
     assert "unsafe:1" in text
     assert "flag:1" in text
+    assert "(last 24h)" in discord._stats_text(summary, since_hours=24)
     assert discord._stats_text(audit_log.summary(Platform.DISCORD, "missing")) == (
         "**nemoguardian stats**\nNo moderation cases found."
+    )
+    assert discord._stats_text(audit_log.summary(Platform.DISCORD, "missing"), since_hours=1) == (
+        "**nemoguardian stats** (last 1h)\nNo moderation cases found."
     )
 
 
@@ -287,8 +291,12 @@ async def test_discord_audit_top_users_orders_repeat_offenders(tmp_path):
     assert rows[1]["user_id"] == "77"
     assert "cases `2`" in text
     assert "delete:2" in text
+    assert "(last 1.5h)" in discord._offenders_text(rows, case_limit=10, since_hours=1.5)
     assert discord._offenders_text([], case_limit=10) == (
         "**nemoguardian offenders**\nNo moderated users found."
+    )
+    assert discord._offenders_text([], case_limit=10, since_hours=2) == (
+        "**nemoguardian offenders** (last 2h)\nNo moderated users found."
     )
 
 
