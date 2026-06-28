@@ -88,6 +88,7 @@ class AuditLog:
         workspace_id: str,
         *,
         user_id: str | None = None,
+        channel_id: str | None = None,
         limit: int = 10,
         since: dt.datetime | None = None,
     ) -> list[dict[str, Any]]:
@@ -96,6 +97,7 @@ class AuditLog:
         platform_value = Platform(platform).value
         workspace_value = str(workspace_id)
         user_value = str(user_id) if user_id is not None else None
+        channel_value = str(channel_id) if channel_id is not None else None
         matches = []
         for record in reversed(self._read_records()):
             if record.get("platform") != platform_value:
@@ -103,6 +105,8 @@ class AuditLog:
             if str(record.get("workspace_id")) != workspace_value:
                 continue
             if user_value is not None and str(record.get("user_id")) != user_value:
+                continue
+            if channel_value is not None and str(record.get("channel_id")) != channel_value:
                 continue
             if since is not None and not _record_at_or_after(record, since):
                 continue
@@ -144,10 +148,18 @@ class AuditLog:
         workspace_id: str,
         *,
         user_id: str | None = None,
+        channel_id: str | None = None,
         limit: int = 100,
         since: dt.datetime | None = None,
     ) -> dict[str, Any]:
-        records = self.history(platform, workspace_id, user_id=user_id, limit=limit, since=since)
+        records = self.history(
+            platform,
+            workspace_id,
+            user_id=user_id,
+            channel_id=channel_id,
+            limit=limit,
+            since=since,
+        )
         category_counts: Counter[str] = Counter()
         for record in records:
             category_counts.update(str(category) for category in record.get("categories") or [])
@@ -155,6 +167,7 @@ class AuditLog:
             "platform": Platform(platform).value,
             "workspace_id": str(workspace_id),
             "user_id": str(user_id) if user_id is not None else None,
+            "channel_id": str(channel_id) if channel_id is not None else None,
             "limit": max(0, limit),
             "since": since.isoformat() if since is not None else None,
             "total": len(records),

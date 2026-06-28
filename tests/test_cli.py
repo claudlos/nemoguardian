@@ -40,7 +40,7 @@ def _seed_audit(tmp_path):
             case_id="discord-123-2",
             platform=Platform.DISCORD,
             workspace_id="123",
-            channel_id="456",
+            channel_id="789",
             message_id="2",
             user_id="42",
             username="tester",
@@ -116,7 +116,36 @@ def test_bot_audit_cli_stats_history_and_offenders(tmp_path):
     assert channels.exit_code == 0
     channels_body = json.loads(channels.stdout)
     assert channels_body[0]["channel_id"] == "456"
-    assert channels_body[0]["total"] == 2
+    assert channels_body[0]["total"] == 1
+
+    channel_history = _run(
+        "bot-audit",
+        "history",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+        "--channel-id",
+        "789",
+    )
+    assert channel_history.exit_code == 0
+    assert [record["case_id"] for record in json.loads(channel_history.stdout)] == ["discord-123-2"]
+
+    channel_stats = _run(
+        "bot-audit",
+        "stats",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+        "--channel-id",
+        "789",
+    )
+    assert channel_stats.exit_code == 0
+    channel_stats_body = json.loads(channel_stats.stdout)
+    assert channel_stats_body["channel_id"] == "789"
+    assert channel_stats_body["total"] == 1
+    assert channel_stats_body["verdicts"] == {"controversial": 1}
 
     rules = _run(
         "bot-audit",

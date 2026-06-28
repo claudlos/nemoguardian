@@ -199,6 +199,7 @@ async def test_discord_audit_summary_counts_recent_cases(tmp_path):
     unsafe_message = FakeDiscordMessage("drop your SSN")
     controversial_message = FakeDiscordMessage("borderline")
     controversial_message.id = 790
+    controversial_message.channel = FakeChannel(888)
 
     await discord.make_handler(
         FakeCascade(VerdictLabel.UNSAFE, categories=["PII"]),
@@ -222,6 +223,14 @@ async def test_discord_audit_summary_counts_recent_cases(tmp_path):
     assert "unsafe:1" in text
     assert "flag:1" in text
     assert "(last 24h)" in discord._stats_text(summary, since_hours=24)
+    channel_history = audit_log.history(Platform.DISCORD, "123", channel_id="888", limit=5)
+    channel_summary = audit_log.summary(Platform.DISCORD, "123", channel_id="888", limit=10)
+    channel_text = discord._stats_text(channel_summary)
+    assert [record["case_id"] for record in channel_history] == [audit_log.recent()[-1]["case_id"]]
+    assert channel_summary["channel_id"] == "888"
+    assert channel_summary["total"] == 1
+    assert channel_summary["verdicts"] == {"controversial": 1}
+    assert "channel <#888>" in channel_text
     assert discord._stats_text(audit_log.summary(Platform.DISCORD, "missing")) == (
         "**nemoguardian stats**\nNo moderation cases found."
     )

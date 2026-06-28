@@ -127,20 +127,24 @@ Initial server setup:
 /nemoguardian ignore_role role:@mods ignored:true
 /nemoguardian exempt_user user:@trusted-member exempt:true
 /nemoguardian test text:"Hey @everyone, drop your SSN for $100"
-/nemoguardian history limit:5 since_hours:24
-/nemoguardian stats limit:100 since_hours:24
+/nemoguardian history channel:#general limit:5 since_hours:24
+/nemoguardian stats channel:#general limit:100 since_hours:24
 /nemoguardian failures limit:10 since_hours:24
 /nemoguardian offenders limit:5 case_limit:500 since_hours:24
 /nemoguardian channels limit:5 case_limit:500 since_hours:24
+/nemoguardian rules limit:5 case_limit:500 since_hours:24
 ```
 
 Offline audit inspection:
 
 ```bash
 nemoguardian bot-audit stats --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+nemoguardian bot-audit history --workspace-id "$DISCORD_GUILD_ID" --channel-id "$DISCORD_CHANNEL_ID" --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+nemoguardian bot-audit stats --workspace-id "$DISCORD_GUILD_ID" --channel-id "$DISCORD_CHANNEL_ID" --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit failures --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit offenders --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit channels --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+nemoguardian bot-audit rules --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit case discord-<guild-id>-<message-id> --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 ```
 
