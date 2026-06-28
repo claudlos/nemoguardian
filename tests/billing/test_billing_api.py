@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from nemoguardian import server as srv
 from nemoguardian.billing import db as billing_db
+from nemoguardian.billing import webhook as billing_webhook
 from nemoguardian.billing.plans import Tier
 from nemoguardian.cascade import Cascade
 from nemoguardian.policy.presets import get_preset
@@ -232,6 +233,256 @@ def test_webhook_checkout_completed_upgrades_tier(client, monkeypatch):
     upgraded = billing_db.get_customer(customer.id)
     assert upgraded.tier == "pro"
     assert upgraded.stripe_customer_id == "cus_test_X"
+
+
+def test_webhook_signature_parser_rejects_malformed_headers(monkeypatch):
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
+
+    assert billing_webhook.verify_signature(b"{}", "not-a-stripe-header") is False
+    assert billing_webhook.verify_signature(b"{}", "t=not-an-int,v1=abc") is False
+    assert billing_webhook.verify_signature(b"{}", "t=1717200000,v1=abc", now=1717200000) is False
+
+
+def test_webhook_rejects_invalid_json_after_valid_signature(client, monkeypatch):
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
+    body = b"{not-json"
+    timestamp = int(time.time())
+    digest = hmac.new(
+        b"whsec_test",
+        f"{timestamp}.".encode() + body,
+        hashlib.sha256,
+    ).hexdigest()
+
+    r = client.post(
+        "/billing/webhook",
+        content=body,
+        headers={
+            "Stripe-Signature": f"t={timestamp},v1={digest}",
+            "Content-Type": "application/json",
+        },
+    )
+
+    assert r.status_code == 400
+    assert "invalid JSON" in r.json()["detail"]
+
+
+def test_webhook_ignores_unknown_event_type(client, monkeypatch):
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
+    payload = {"type": "invoice.payment_succeeded", "data": {"object": {"id": "in_1"}}}
+    body, signature = _signed_payload(payload, "whsec_test")
+
+    r = client.post(
+        "/billing/webhook",
+        content=body,
+        headers={"Stripe-Signature": signature, "Content-Type": "application/json"},
+    )
+
+    assert r.status_code == 200
+    assert r.json() == {
+        "received": True,
+        "type": "invoice.payment_succeeded",
+        "ignored": True,
+    }
+
+
+def test_webhook_checkout_ignores_missing_invalid_and_unmatched_metadata(client, monkeypatch):
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
+
+    for payload, reason in [
+        (
+            {
+                "type": "checkout.session.completed",
+                "data": {"object": {"metadata": {}}},
+            },
+            "no tier metadata",
+        ),
+        (
+            {
+                "type": "checkout.session.completed",
+                "data": {"object": {"metadata": {"nemoguardian_tier": "enterprise"}}},
+            },
+            "no tier metadata",
+        ),
+        (
+            {
+                "type": "checkout.session.completed",
+                "data": {"object": {"metadata": {"nemoguardian_tier": "pro"}}},
+            },
+            "no matching customer",
+        ),
+    ]:
+        body, signature = _signed_payload(payload, "whsec_test")
+        r = client.post(
+            "/billing/webhook",
+            content=body,
+            headers={"Stripe-Signature": signature, "Content-Type": "application/json"},
+        )
+
+        assert r.status_code == 200
+        assert r.json()["ignored"] is True
+        assert r.json()["reason"] == reason
+
+
+def test_webhook_checkout_matches_existing_stripe_customer(client, monkeypatch):
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
+    customer = billing_db.upsert_customer(
+        email="stripe-match@example.com",
+        stripe_customer_id="cus_existing",
+    )
+    payload = {
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "customer": "cus_existing",
+                "metadata": {"nemoguardian_tier": "scale"},
+            }
+        },
+    }
+    body, signature = _signed_payload(payload, "whsec_test")
+
+    r = client.post(
+        "/billing/webhook",
+        content=body,
+        headers={"Stripe-Signature": signature, "Content-Type": "application/json"},
+    )
+
+    assert r.status_code == 200
+    assert r.json()["customer_id"] == customer.id
+    assert r.json()["tier"] == "scale"
+    assert billing_db.get_customer(customer.id).tier == "scale"
+
+
+def test_webhook_checkout_creates_customer_from_email_details(client, monkeypatch):
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
+    payload = {
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "customer": "cus_new",
+                "customer_details": {"email": "new-checkout@example.com"},
+                "metadata": {"nemoguardian_tier": "pro"},
+            }
+        },
+    }
+    body, signature = _signed_payload(payload, "whsec_test")
+
+    r = client.post(
+        "/billing/webhook",
+        content=body,
+        headers={"Stripe-Signature": signature, "Content-Type": "application/json"},
+    )
+
+    assert r.status_code == 200
+    customer = billing_db.get_customer_by_email("new-checkout@example.com")
+    assert customer is not None
+    assert customer.stripe_customer_id == "cus_new"
+    assert customer.tier == "pro"
+
+
+def test_webhook_subscription_lifecycle_updates_customer_and_subscription(client, monkeypatch):
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
+    customer = billing_db.upsert_customer(
+        email="subscriber@example.com",
+        stripe_customer_id="cus_subscriber",
+    )
+    payload = {
+        "type": "customer.subscription.updated",
+        "data": {
+            "object": {
+                "id": "sub_live",
+                "customer": "cus_subscriber",
+                "status": "active",
+                "metadata": {"nemoguardian_tier": "scale"},
+                "current_period_start": 1717200000,
+                "current_period_end": 1719792000,
+                "cancel_at_period_end": True,
+            }
+        },
+    }
+    body, signature = _signed_payload(payload, "whsec_test")
+
+    r = client.post(
+        "/billing/webhook",
+        content=body,
+        headers={"Stripe-Signature": signature, "Content-Type": "application/json"},
+    )
+
+    assert r.status_code == 200
+    assert r.json()["handled"] is True
+    assert r.json()["tier"] == "scale"
+    updated = billing_db.get_customer(customer.id)
+    assert updated.tier == "scale"
+    row = billing_db.init_db().execute(
+        "SELECT * FROM subscriptions WHERE stripe_subscription_id = ?",
+        ("sub_live",),
+    ).fetchone()
+    assert row["status"] == "active"
+    assert row["tier"] == "scale"
+    assert row["cancel_at_period_end"] == 1
+
+
+def test_webhook_subscription_canceled_downgrades_to_free(client, monkeypatch):
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
+    customer = billing_db.upsert_customer(
+        email="cancel@example.com",
+        stripe_customer_id="cus_cancel",
+    )
+    billing_db.set_customer_tier(customer.id, Tier.PRO)
+    payload = {
+        "type": "customer.subscription.deleted",
+        "data": {
+            "object": {
+                "id": "sub_cancel",
+                "customer": "cus_cancel",
+                "status": "canceled",
+                "metadata": {"nemoguardian_tier": "pro"},
+            }
+        },
+    }
+    body, signature = _signed_payload(payload, "whsec_test")
+
+    r = client.post(
+        "/billing/webhook",
+        content=body,
+        headers={"Stripe-Signature": signature, "Content-Type": "application/json"},
+    )
+
+    assert r.status_code == 200
+    assert r.json()["status"] == "canceled"
+    assert r.json()["tier"] == "pro"
+    assert billing_db.get_customer(customer.id).tier == "free"
+
+
+def test_webhook_subscription_past_due_keeps_existing_tier(client, monkeypatch):
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
+    customer = billing_db.upsert_customer(
+        email="pastdue@example.com",
+        stripe_customer_id="cus_pastdue",
+    )
+    billing_db.set_customer_tier(customer.id, Tier.PRO)
+    payload = {
+        "type": "customer.subscription.updated",
+        "data": {
+            "object": {
+                "id": "sub_pastdue",
+                "customer": "cus_pastdue",
+                "status": "past_due",
+                "metadata": {},
+            }
+        },
+    }
+    body, signature = _signed_payload(payload, "whsec_test")
+
+    r = client.post(
+        "/billing/webhook",
+        content=body,
+        headers={"Stripe-Signature": signature, "Content-Type": "application/json"},
+    )
+
+    assert r.status_code == 200
+    assert r.json()["status"] == "past_due"
+    assert r.json()["tier"] == "pro"
+    assert billing_db.get_customer(customer.id).tier == "pro"
 
 
 def test_webhook_signature_required_when_secret_missing(client):
