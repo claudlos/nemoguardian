@@ -7,6 +7,8 @@ return synthetic verdicts.
 from __future__ import annotations
 
 import json
+import sys
+from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -129,6 +131,42 @@ def test_health(client):
     assert "runtime_device" in body
 
 
+def test_health_falls_back_to_cpu_when_torch_probe_fails(client, monkeypatch):
+    torch_module = ModuleType("torch")
+    torch_module.cuda = SimpleNamespace(
+        is_available=lambda: (_ for _ in ()).throw(RuntimeError("cuda probe failed"))
+    )
+    monkeypatch.setitem(sys.modules, "torch", torch_module)
+
+    r = client.get("/health")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["gpu_available"] is False
+    assert body["gpu_name"] is None
+    assert body["runtime_device"] == "cpu"
+
+
+def test_state_bootstrap_builds_cascade_and_policy_cache(monkeypatch):
+    created: list[object] = []
+    fake_cascade = SimpleNamespace()
+
+    def fake_cascade_factory(config):
+        created.append(config)
+        return fake_cascade
+
+    monkeypatch.setattr(srv._State, "cascade", None)
+    monkeypatch.setattr(srv._State, "policies", {})
+    monkeypatch.setattr(srv, "Cascade", fake_cascade_factory)
+    monkeypatch.setattr(srv.CascadeConfig, "from_env", staticmethod(lambda: "config-from-env"))
+    monkeypatch.setattr(srv, "PRESETS", {"discord": object(), "twitch": object()})
+    monkeypatch.setattr(srv, "get_preset", lambda name: f"policy-{name}")
+
+    assert srv.get_cascade() is fake_cascade
+    assert srv.get_policies() == {"discord": "policy-discord", "twitch": "policy-twitch"}
+    assert created == ["config-from-env"]
+
+
 def test_moderate_blocked(client):
     # Without a preset, the policy gate doesn't run, so matched_rule is None.
     # The aggregator alone flags the verdict as unsafe (Nemotron-CSR hit hard-unsafe override).
@@ -154,6 +192,60 @@ def test_moderate_with_preset_matches_rule(client):
 def test_moderate_unknown_preset(client):
     r = client.post("/v1/moderate", json={"text": "x"}, params={"policy_preset": "nope"})
     assert r.status_code == 400
+
+
+def test_moderate_accepts_inline_policy_yaml(client):
+    policy_yaml = """
+name: inline-test
+rules:
+  - id: inline-block-pii
+    when:
+      categories_include: ["PII"]
+    then:
+      final_label: unsafe
+"""
+
+    r = client.post(
+        "/v1/moderate",
+        json={"text": "drop your SSN"},
+        params={"policy_yaml": policy_yaml},
+    )
+
+    assert r.status_code == 200
+    assert r.json()["matched_policy_rule"] == "inline-block-pii"
+
+
+def test_moderate_returns_500_on_cascade_error(client):
+    srv.get_cascade().moderate.side_effect = RuntimeError("cascade down")
+
+    r = client.post("/v1/moderate", json={"text": "drop your SSN"})
+
+    assert r.status_code == 500
+    assert "moderation failed: cascade down" in r.json()["detail"]
+
+
+def test_moderate_returns_429_when_allowance_exceeded(client, monkeypatch):
+    monkeypatch.setattr(
+        srv.billing_metered,
+        "check_allowance",
+        lambda _customer_id: (
+            False,
+            {
+                "total_calls": 50_000,
+                "allowance": 50_000,
+                "overage_calls": 1,
+                "overage_cents": 0.1,
+                "period_start": "2026-06-01T00:00:00+00:00",
+                "period_end": "2026-07-01T00:00:00+00:00",
+            },
+        ),
+    )
+
+    r = client.post("/v1/moderate", json={"text": "drop your SSN"})
+
+    assert r.status_code == 429
+    assert r.json()["detail"]["error"] == "monthly allowance exceeded"
+    assert r.json()["detail"]["upgrade_url"] == "/billing/checkout?plan=scale"
 
 
 def test_demo_moderate_disabled_by_default(client):
@@ -183,6 +275,23 @@ def test_demo_moderate_can_be_disabled(client, monkeypatch):
     assert r.status_code == 404
 
 
+def test_demo_moderate_returns_500_on_cascade_error(client, monkeypatch):
+    monkeypatch.setenv("NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT", "yes")
+    client.headers.pop("Authorization", None)
+    srv.get_cascade().moderate.side_effect = RuntimeError("demo down")
+
+    r = client.post("/demo/moderate", json={"text": "hello"})
+
+    assert r.status_code == 500
+    assert "demo moderation failed: demo down" in r.json()["detail"]
+
+
+def test_demo_endpoint_enabled_accepts_truthy_values(monkeypatch):
+    for value in ("1", "true", "yes", "on"):
+        monkeypatch.setenv("NEMOGUARDIAN_ENABLE_DEMO_ENDPOINT", value)
+        assert srv._demo_endpoint_enabled() is True
+
+
 def test_demo_ui_served(client):
     r = client.get("/demo")
     assert r.status_code == 200
@@ -205,3 +314,45 @@ def test_stream_moderation_is_authenticated_and_metered(client):
     assert customer is not None
     _allowed, usage = billing_metered.check_allowance(customer.id)
     assert usage["total_calls"] == 1
+
+
+def test_stream_moderation_returns_terminal_safe_chunk_on_error(client):
+    srv.get_cascade().stream_token_verdicts.side_effect = RuntimeError("stream down")
+
+    r = client.post("/v1/moderate/stream", json={"text": "drop your SSN"})
+
+    assert r.status_code == 200
+    lines = [json.loads(line) for line in r.text.strip().splitlines()]
+    assert lines == [
+        {
+            "token_index": 0,
+            "partial_text": "drop your SSN",
+            "verdict_so_far": "safe",
+            "score_so_far": 0.0,
+            "is_terminal": True,
+            "latency_ms": 0.0,
+        }
+    ]
+
+
+def test_stream_moderation_returns_429_when_allowance_exceeded(client, monkeypatch):
+    monkeypatch.setattr(
+        srv.billing_metered,
+        "check_allowance",
+        lambda _customer_id: (
+            False,
+            {
+                "total_calls": 50_000,
+                "allowance": 50_000,
+                "overage_calls": 1,
+                "overage_cents": 0.1,
+                "period_start": "2026-06-01T00:00:00+00:00",
+                "period_end": "2026-07-01T00:00:00+00:00",
+            },
+        ),
+    )
+
+    r = client.post("/v1/moderate/stream", json={"text": "drop your SSN"})
+
+    assert r.status_code == 429
+    assert r.json()["detail"]["error"] == "monthly allowance exceeded"

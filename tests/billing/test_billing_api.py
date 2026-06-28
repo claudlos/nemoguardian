@@ -16,6 +16,7 @@ from nemoguardian.billing import db as billing_db
 from nemoguardian.billing.plans import Tier
 from nemoguardian.cascade import Cascade
 from nemoguardian.policy.presets import get_preset
+from nemoguardian.providers.base import Instance, InstanceState, Offer, ProviderName, ProvisionError
 from nemoguardian.schemas import ModelVerdict, ModerateResponse, VerdictLabel
 
 
@@ -69,6 +70,71 @@ def _mock_moderate(request, policy_engine=None, **kw) -> ModerateResponse:
     )
 
 
+class FakeProvider:
+    name = ProviderName.VAST_AI
+
+    def __init__(
+        self,
+        offers: list[Offer],
+        *,
+        instance: Instance | None = None,
+        provision_error: Exception | None = None,
+    ) -> None:
+        self.offers = offers
+        self.instance = instance
+        self.provision_error = provision_error
+        self.list_calls: list[dict] = []
+        self.provision_calls: list[dict] = []
+
+    async def list_offers(self, *, gpu_model=None, max_price_usd=None):
+        self.list_calls.append({"gpu_model": gpu_model, "max_price_usd": max_price_usd})
+        offers = self.offers
+        if gpu_model:
+            offers = [offer for offer in offers if offer.gpu_model == gpu_model]
+        if max_price_usd is not None:
+            offers = [offer for offer in offers if offer.price_per_hour_usd <= max_price_usd]
+        return offers
+
+    async def provision(self, offer, *, ssh_public_key=None, image=None, env=None):
+        self.provision_calls.append({
+            "offer": offer,
+            "ssh_public_key": ssh_public_key,
+            "image": image,
+            "env": env,
+        })
+        if self.provision_error:
+            raise self.provision_error
+        return self.instance or Instance(
+            provider=ProviderName.VAST_AI,
+            instance_id="fake-instance",
+            gpu_model=offer.gpu_model,
+            vram_gb=offer.vram_gb,
+            region=offer.region,
+            state=InstanceState.LIVE,
+            endpoint_url="https://gpu.test",
+            ssh_command="ssh root@gpu.test",
+            hourly_price_usd=offer.price_per_hour_usd,
+        )
+
+
+class BrokenOfferProvider:
+    name = ProviderName.RUNPOD
+
+    async def list_offers(self, *, gpu_model=None, max_price_usd=None):
+        raise RuntimeError("provider unavailable")
+
+
+class FakeProviderRegistry:
+    def __init__(self, providers: list[object]) -> None:
+        self.providers = {provider.name: provider for provider in providers}
+
+    def all(self) -> list[object]:
+        return list(self.providers.values())
+
+    def get(self, name: ProviderName):
+        return self.providers[name]
+
+
 @pytest.fixture
 def client(monkeypatch):
     fake_cascade = MagicMock(spec=Cascade)
@@ -95,6 +161,14 @@ def client(monkeypatch):
     from nemoguardian.server import app
 
     return TestClient(app)
+
+
+def _auth_headers_for_tier(tier: Tier, *, email: str = "tier@example.com") -> tuple[dict[str, str], billing_db.Customer]:
+    customer = billing_db.upsert_customer(email=email)
+    billing_db.set_customer_tier(customer.id, tier)
+    customer = billing_db.get_customer(customer.id)
+    raw, _ = billing_db.create_api_key(customer.id, label=f"{tier.value}-test")
+    return {"Authorization": f"Bearer {raw}"}, customer
 
 
 def test_list_plans(client):
@@ -353,6 +427,201 @@ def test_usage_endpoint_returns_allowance(client):
     body = r.json()
     assert body["allowance"] == 1_000
     assert body["tier"] == "free"
+
+
+def test_create_key_endpoint_returns_new_key_once(client):
+    headers, _customer = _auth_headers_for_tier(Tier.PRO, email="key-create@example.com")
+
+    r = client.post("/billing/keys", headers=headers, json={"label": "bot-prod"})
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["api_key"].startswith("nmg_")
+    assert body["label"] == "bot-prod"
+    assert body["tier"] == "pro"
+
+
+def test_billing_job_status_rejects_other_customer(client):
+    owner_headers, owner = _auth_headers_for_tier(Tier.SELF_HOSTED, email="job-owner@example.com")
+    other_headers, _other = _auth_headers_for_tier(Tier.SELF_HOSTED, email="job-other@example.com")
+    create = client.post("/billing/provision", headers=owner_headers, json={"provider": "on_prem"})
+    assert create.status_code == 200
+
+    r = client.get(f"/billing/jobs/{create.json()['job_id']}", headers=other_headers)
+
+    assert r.status_code == 403
+    assert r.json()["detail"] == "not your job"
+    assert billing_db.get_customer(owner.id).email == "job-owner@example.com"
+
+
+def test_providers_catalog_endpoint_lists_known_providers(client):
+    r = client.get("/providers")
+
+    assert r.status_code == 200
+    providers = r.json()["providers"]
+    assert any(provider["name"] == "vastai" for provider in providers)
+    assert all("supports_provisioning" in provider for provider in providers)
+
+
+def test_provider_offers_filters_fits_and_ignores_provider_errors(client, monkeypatch):
+    small = Offer(ProviderName.VAST_AI, "RTX 3060", 12, 0.03, "US", offer_id="small")
+    fit = Offer(ProviderName.VAST_AI, "RTX 3090", 24, 0.07, "US", offer_id="fit")
+    provider = FakeProvider([small, fit])
+    registry = FakeProviderRegistry([provider, BrokenOfferProvider()])
+    monkeypatch.setattr(srv, "providers_registry", lambda: registry)
+
+    r = client.get("/providers/offers")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["count"] == 1
+    assert body["offers"][0]["offer_id"] == "fit"
+    assert body["cascade_vram_requirement_gb"] == 24.0
+
+    r_all = client.get(
+        "/providers/offers",
+        params={"only_fits": False, "gpu_model": "RTX 3060", "max_price_usd": 0.04},
+    )
+    assert r_all.status_code == 200
+    assert [offer["offer_id"] for offer in r_all.json()["offers"]] == ["small"]
+    assert provider.list_calls[-1] == {"gpu_model": "RTX 3060", "max_price_usd": 0.04}
+
+
+def test_billing_provision_cheapest_requires_self_hosted(client):
+    headers, _customer = _auth_headers_for_tier(Tier.PRO, email="pro-cheapest@example.com")
+
+    r = client.post(
+        "/billing/provision/cheapest",
+        headers=headers,
+        json={"max_price_usd": 0.10},
+    )
+
+    assert r.status_code == 402
+    assert "self-hosted provisioning requires" in r.json()["detail"]
+
+
+def test_billing_provision_cheapest_persists_job(client, monkeypatch):
+    headers, customer = _auth_headers_for_tier(Tier.SELF_HOSTED, email="cheapest@example.com")
+    captured: dict = {}
+    offer = Offer(ProviderName.VAST_AI, "RTX 3090", 24, 0.07, "US", offer_id="fit")
+    instance = Instance(
+        provider=ProviderName.VAST_AI,
+        instance_id="vast-1",
+        gpu_model="RTX 3090",
+        vram_gb=24,
+        region="US",
+        state=InstanceState.LIVE,
+        endpoint_url="https://vast.test",
+        ssh_command="ssh root@vast.test",
+    )
+
+    async def fake_provision_cheapest_fit(**kwargs):
+        captured.update(kwargs)
+        return offer, instance
+
+    monkeypatch.setattr(srv, "provision_cheapest_fit", fake_provision_cheapest_fit)
+
+    r = client.post(
+        "/billing/provision/cheapest",
+        headers=headers,
+        json={
+            "ssh_public_key": "ssh-ed25519 AAAA test",
+            "image": "nemoguardian:test",
+            "max_price_usd": 0.10,
+        },
+    )
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "live"
+    assert body["instance_id"] == "vast-1"
+    assert body["endpoint_url"] == "https://vast.test"
+    assert captured["ssh_public_key"] == "ssh-ed25519 AAAA test"
+    assert captured["image"] == "nemoguardian:test"
+    assert captured["max_price_usd"] == 0.10
+    assert captured["env"]["NEMOGUARDIAN_CUSTOMER_ID"] == str(customer.id)
+    assert captured["env"]["NEMOGUARDIAN_API_KEY"].startswith("nmg_")
+    job = billing_db.get_provisioning_job(body["job_id"])
+    assert job.customer_id == customer.id
+    assert job.status == "live"
+
+
+def test_billing_provision_cheapest_reports_provider_failure(client, monkeypatch):
+    headers, _customer = _auth_headers_for_tier(Tier.SELF_HOSTED, email="cheapest-fail@example.com")
+
+    async def fail_provision_cheapest_fit(**_kwargs):
+        raise RuntimeError("no capacity")
+
+    monkeypatch.setattr(srv, "provision_cheapest_fit", fail_provision_cheapest_fit)
+
+    r = client.post("/billing/provision/cheapest", headers=headers, json={})
+
+    assert r.status_code == 502
+    assert "provisioning failed: no capacity" in r.json()["detail"]
+
+
+def test_billing_provision_specific_validates_provider_and_offer_filters(client, monkeypatch):
+    headers, _customer = _auth_headers_for_tier(Tier.SELF_HOSTED, email="specific@example.com")
+    provider = FakeProvider([Offer(ProviderName.VAST_AI, "RTX 3060", 12, 0.03, "US")])
+    monkeypatch.setattr(srv, "providers_registry", lambda: FakeProviderRegistry([provider]))
+
+    unknown = client.post("/billing/provision/not-a-provider", headers=headers, json={})
+    assert unknown.status_code == 400
+
+    no_fit = client.post("/billing/provision/vastai", headers=headers, json={})
+    assert no_fit.status_code == 404
+    assert "no fitting offers" in no_fit.json()["detail"]
+
+
+def test_billing_provision_specific_requires_self_hosted(client):
+    headers, _customer = _auth_headers_for_tier(Tier.PRO, email="specific-pro@example.com")
+
+    r = client.post("/billing/provision/vastai", headers=headers, json={})
+
+    assert r.status_code == 402
+    assert r.json()["detail"] == "self-hosted provisioning requires the self_hosted plan"
+
+
+def test_billing_provision_specific_persists_selected_offer(client, monkeypatch):
+    headers, customer = _auth_headers_for_tier(Tier.SELF_HOSTED, email="specific-success@example.com")
+    cheap = Offer(ProviderName.VAST_AI, "RTX 3090", 24, 0.07, "US", offer_id="cheap")
+    selected = Offer(ProviderName.VAST_AI, "RTX 4090", 24, 0.12, "US", offer_id="selected")
+    provider = FakeProvider([cheap, selected])
+    monkeypatch.setattr(srv, "providers_registry", lambda: FakeProviderRegistry([provider]))
+
+    r = client.post(
+        "/billing/provision/vastai",
+        headers=headers,
+        json={
+            "offer_id": "selected",
+            "gpu_model": "RTX 4090",
+            "ssh_public_key": "ssh-ed25519 AAAA test",
+            "image": "nemoguardian:test",
+        },
+    )
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "live"
+    assert body["instance_id"] == "fake-instance"
+    assert provider.provision_calls[0]["offer"].offer_id == "selected"
+    assert provider.provision_calls[0]["ssh_public_key"] == "ssh-ed25519 AAAA test"
+    assert provider.provision_calls[0]["image"] == "nemoguardian:test"
+    assert provider.provision_calls[0]["env"]["NEMOGUARDIAN_CUSTOMER_ID"] == str(customer.id)
+
+
+def test_billing_provision_specific_reports_provider_error(client, monkeypatch):
+    headers, _customer = _auth_headers_for_tier(Tier.SELF_HOSTED, email="specific-error@example.com")
+    provider = FakeProvider(
+        [Offer(ProviderName.VAST_AI, "RTX 3090", 24, 0.07, "US", offer_id="fit")],
+        provision_error=ProvisionError("denied"),
+    )
+    monkeypatch.setattr(srv, "providers_registry", lambda: FakeProviderRegistry([provider]))
+
+    r = client.post("/billing/provision/vastai", headers=headers, json={})
+
+    assert r.status_code == 502
+    assert "vastai provisioning failed: denied" in r.json()["detail"]
 
 
 def _signed_payload(payload: dict, secret: str, *, timestamp: int | None = None) -> tuple[bytes, str]:
