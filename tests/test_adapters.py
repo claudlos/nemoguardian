@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -14,6 +15,8 @@ from nemoguardian.bot import (
     BotConfig,
     ConfigStore,
     ModerationAction,
+    ModerationEvaluation,
+    ModerationPlan,
     Platform,
     since_hours_ago,
 )
@@ -60,8 +63,11 @@ class FakeChannel:
     def __init__(self, channel_id: int = 456) -> None:
         self.id = channel_id
         self.messages: list[str] = []
+        self.fail_send = False
 
     async def send(self, message: str) -> None:
+        if self.fail_send:
+            raise RuntimeError("send failed")
         self.messages.append(message)
 
 
@@ -82,9 +88,23 @@ class FakeAuthor:
 
     def __init__(self) -> None:
         self.roles: list[Any] = []
+        self.dms: list[str] = []
+        self.timeout_calls: list[dict[str, Any]] = []
+        self.fail_dm = False
+        self.fail_timeout = False
 
     def __str__(self) -> str:
         return "tester"
+
+    async def send(self, message: str) -> None:
+        if self.fail_dm:
+            raise RuntimeError("dm failed")
+        self.dms.append(message)
+
+    async def timeout(self, until, *, reason: str) -> None:
+        if self.fail_timeout:
+            raise RuntimeError("timeout failed")
+        self.timeout_calls.append({"until": until, "reason": reason})
 
 
 class FakeDiscordMessage:
@@ -111,6 +131,177 @@ def _stores(tmp_path):
         ConfigStore(tmp_path / "bot-config.json"),
         AuditLog(tmp_path / "bot-audit.jsonl"),
     )
+
+
+def _evaluation(
+    message: FakeDiscordMessage,
+    *,
+    config: BotConfig | None = None,
+    verdict: VerdictLabel = VerdictLabel.UNSAFE,
+    action: ModerationAction = ModerationAction.DELETE,
+    categories: list[str] | None = None,
+    result: ModerateResponse | None | bool = True,
+    **plan_changes: Any,
+) -> ModerationEvaluation:
+    config = config or BotConfig.default(Platform.DISCORD, str(message.guild.id))
+    context = discord._context_from_message(message)
+    response = None
+    if result is not None and result is not False:
+        response = ModerateResponse(
+            verdict=verdict,
+            score=0.9,
+            reasons=["fake"],
+            categories=categories or ["PII"],
+            matched_policy_rule="fake-rule",
+            model_verdicts={},
+            total_latency_ms=123.0,
+            mode=config.mode,
+            request_id="req-test",
+        )
+    plan = ModerationPlan(action=action, reason=", ".join(categories or ["PII"]))
+    for key, value in plan_changes.items():
+        setattr(plan, key, value)
+    return ModerationEvaluation(context=context, config=config, result=response, plan=plan)
+
+
+class FakeResponse:
+    def __init__(self) -> None:
+        self.messages: list[dict[str, Any]] = []
+
+    async def send_message(self, text: str, *, ephemeral: bool) -> None:
+        self.messages.append({"text": text, "ephemeral": ephemeral})
+
+
+class FakeInteraction:
+    def __init__(self, *, manage_guild: bool = True) -> None:
+        self.guild_id = 123
+        self.channel_id = 456
+        self.id = 999
+        self.user = SimpleNamespace(
+            id=42,
+            roles=[],
+            guild_permissions=SimpleNamespace(manage_guild=manage_guild),
+            __str__=lambda: "tester",
+        )
+        self.app_permissions = SimpleNamespace(
+            view_channel=True,
+            read_message_history=True,
+            send_messages=True,
+            manage_messages=True,
+            embed_links=True,
+            moderate_members=True,
+        )
+        self.response = FakeResponse()
+
+
+def _install_fake_discord(monkeypatch: pytest.MonkeyPatch):
+    discord_module = ModuleType("discord")
+    app_commands_module = ModuleType("discord.app_commands")
+    ext_module = ModuleType("discord.ext")
+    commands_module = ModuleType("discord.ext.commands")
+
+    class FakeIntents:
+        def __init__(self) -> None:
+            self.guilds = False
+            self.message_content = False
+
+        @classmethod
+        def default(cls) -> FakeIntents:
+            return cls()
+
+    class FakeObject:
+        def __init__(self, *, id: int) -> None:
+            self.id = id
+
+    class FakePermissions:
+        def __init__(self, **permissions: bool) -> None:
+            self.__dict__.update(permissions)
+
+    class FakeChoice:
+        def __init__(self, *, name: str, value: str) -> None:
+            self.name = name
+            self.value = value
+
+        @classmethod
+        def __class_getitem__(cls, _item):
+            return cls
+
+    class FakeGroup:
+        def __init__(self, *, name: str, description: str, default_permissions=None) -> None:
+            self.name = name
+            self.description = description
+            self.default_permissions = default_permissions
+            self.commands: dict[str, Any] = {}
+
+        def command(self, *, name: str, description: str):
+            def decorator(func):
+                self.commands[name] = func
+                return func
+
+            return decorator
+
+    class FakeTree:
+        def __init__(self) -> None:
+            self.group: FakeGroup | None = None
+            self.copy_targets: list[Any] = []
+            self.sync_targets: list[Any] = []
+
+        def add_command(self, group: FakeGroup) -> None:
+            self.group = group
+
+        def copy_global_to(self, *, guild) -> None:
+            self.copy_targets.append(guild)
+
+        async def sync(self, *, guild=None) -> None:
+            self.sync_targets.append(guild)
+
+    class FakeBot:
+        def __init__(self, *, command_prefix: str, intents: FakeIntents) -> None:
+            self.command_prefix = command_prefix
+            self.intents = intents
+            self.tree = FakeTree()
+            self.events: dict[str, Any] = {}
+            self.user = "fake-bot"
+            self.ran_token: str | None = None
+
+        def event(self, func):
+            self.events[func.__name__] = func
+            return func
+
+        def run(self, token: str) -> None:
+            self.ran_token = token
+
+    def passthrough_decorator(**_kwargs):
+        def decorator(func):
+            return func
+
+        return decorator
+
+    def choices(**_kwargs):
+        def decorator(func):
+            return func
+
+        return decorator
+
+    discord_module.Intents = FakeIntents
+    discord_module.Object = FakeObject
+    discord_module.Permissions = FakePermissions
+    discord_module.TextChannel = SimpleNamespace
+    discord_module.Role = SimpleNamespace
+    discord_module.Member = SimpleNamespace
+    discord_module.app_commands = app_commands_module
+    app_commands_module.Group = FakeGroup
+    app_commands_module.Choice = FakeChoice
+    app_commands_module.default_permissions = passthrough_decorator
+    app_commands_module.choices = choices
+    commands_module.Bot = FakeBot
+    ext_module.commands = commands_module
+
+    monkeypatch.setitem(sys.modules, "discord", discord_module)
+    monkeypatch.setitem(sys.modules, "discord.app_commands", app_commands_module)
+    monkeypatch.setitem(sys.modules, "discord.ext", ext_module)
+    monkeypatch.setitem(sys.modules, "discord.ext.commands", commands_module)
+    return FakeBot
 
 
 async def test_discord_adapter_deletes_unsafe_message(tmp_path):
@@ -173,6 +364,149 @@ async def test_discord_mod_log_and_audit_redact_sensitive_evidence(tmp_path):
         assert marker in record["text_excerpt"]
     assert record["text_sha256"] == text_hash(message.content)
     assert record["details"]["text_redacted"] is True
+
+
+async def test_discord_adapter_ignores_messages_without_guild(tmp_path):
+    config_store, audit_log = _stores(tmp_path)
+    cascade = FakeCascade(VerdictLabel.UNSAFE)
+    message = FakeDiscordMessage("dm content")
+    message.guild = None
+
+    await discord.make_handler(cascade, config_store=config_store, audit_log=audit_log)(message)
+
+    assert cascade.calls == []
+    assert message.deleted is False
+    assert audit_log.recent() == []
+
+
+async def test_discord_apply_actions_allows_without_side_effects():
+    message = FakeDiscordMessage("normal chat")
+    config = BotConfig.default(Platform.DISCORD, "123")
+    config.log_channel_id = "999"
+    evaluation = _evaluation(
+        message,
+        config=config,
+        verdict=VerdictLabel.SAFE,
+        action=ModerationAction.ALLOW,
+        categories=[],
+    )
+
+    status, error = await discord.apply_discord_actions(message, evaluation)
+
+    assert (status, error) == ("allowed", None)
+    assert message.deleted is False
+    assert message.guild.log_channel.messages == []
+
+
+async def test_discord_apply_actions_dry_run_logs_without_enforcement():
+    message = FakeDiscordMessage("drop your SSN")
+    config = BotConfig.default(Platform.DISCORD, "123")
+    config.log_channel_id = "999"
+    config.dry_run = True
+    evaluation = _evaluation(
+        message,
+        config=config,
+        delete_message=True,
+        public_warning=True,
+    )
+
+    status, error = await discord.apply_discord_actions(message, evaluation)
+
+    assert (status, error) == ("dry-run", None)
+    assert message.deleted is False
+    assert message.channel.messages == []
+    assert "applied: `dry-run`" in message.guild.log_channel.messages[0]
+
+
+async def test_discord_apply_actions_timeout_and_dm_success():
+    message = FakeDiscordMessage("serious violation")
+    config = BotConfig.default(Platform.DISCORD, "123")
+    config.timeout_seconds = 120
+    config.dm_users = True
+    evaluation = _evaluation(
+        message,
+        config=config,
+        action=ModerationAction.TIMEOUT,
+        timeout_user=True,
+        notify_user=True,
+    )
+
+    status, error = await discord.apply_discord_actions(message, evaluation)
+
+    assert (status, error) == ("timeout+dm", None)
+    assert message.author.timeout_calls[0]["reason"] == "PII"
+    assert message.author.dms == ["Your message in Test Guild was moderated: PII"]
+
+
+async def test_discord_apply_actions_collects_partial_errors():
+    message = FakeDiscordMessage("borderline")
+    message.author.fail_dm = True
+    evaluation = _evaluation(
+        message,
+        action=ModerationAction.DELETE,
+        delete_message=True,
+        add_reaction=True,
+        notify_user=True,
+        public_warning=False,
+    )
+
+    async def fail_delete() -> None:
+        raise RuntimeError("delete failed")
+
+    message.delete = fail_delete
+    status, error = await discord.apply_discord_actions(message, evaluation)
+
+    assert status == "partial"
+    assert error == "delete:RuntimeError;dm:RuntimeError"
+    assert message.reactions == [discord.WARNING_REACTION]
+
+
+async def test_discord_apply_actions_reports_failed_when_every_action_errors():
+    message = FakeDiscordMessage("unsafe")
+    message.channel.fail_send = True
+
+    async def fail_reaction(_reaction: str) -> None:
+        raise RuntimeError("reaction failed")
+
+    async def fail_delete() -> None:
+        raise RuntimeError("delete failed")
+
+    message.add_reaction = fail_reaction
+    message.delete = fail_delete
+    message.author.fail_timeout = True
+    message.author.fail_dm = True
+    evaluation = _evaluation(
+        message,
+        action=ModerationAction.TIMEOUT,
+        add_reaction=True,
+        delete_message=True,
+        timeout_user=True,
+        public_warning=True,
+        notify_user=True,
+    )
+
+    status, error = await discord.apply_discord_actions(message, evaluation)
+
+    assert status == "failed"
+    assert error == (
+        "reaction:RuntimeError;delete:RuntimeError;timeout:RuntimeError;"
+        "public-warning:RuntimeError;dm:RuntimeError"
+    )
+
+
+async def test_discord_apply_actions_reports_unsupported_timeout():
+    message = FakeDiscordMessage("unsafe")
+    message.author = SimpleNamespace(id=42, bot=False, mention="@tester", roles=[])
+    evaluation = _evaluation(
+        message,
+        action=ModerationAction.TIMEOUT,
+        timeout_user=True,
+        categories=["harassment"],
+    )
+
+    status, error = await discord.apply_discord_actions(message, evaluation)
+
+    assert (status, error) == ("failed", "timeout:unsupported-author")
 
 
 async def test_discord_audit_log_supports_case_lookup_and_history(tmp_path):
@@ -961,6 +1295,189 @@ async def test_discord_adapter_honors_action_toggles(tmp_path):
     assert audit_log.recent()[0]["execution_status"] == "planned"
 
 
+async def test_discord_mod_log_handles_missing_and_client_fallback_channels():
+    message = FakeDiscordMessage("drop your SSN")
+    config = BotConfig.default(Platform.DISCORD, "123")
+    config.log_channel_id = "777"
+    evaluation = _evaluation(message, config=config)
+
+    await discord._send_mod_log(message, evaluation, applied=["delete"], errors=[])
+    assert message.guild.log_channel.messages == []
+
+    fallback_channel = FakeChannel(777)
+    client = SimpleNamespace(get_channel=lambda channel_id: fallback_channel if channel_id == 777 else None)
+    message.guild = SimpleNamespace(id=123, name="Test Guild")
+    message._state = SimpleNamespace(_get_client=lambda: client)
+
+    await discord._send_mod_log(message, evaluation, applied=["delete"], errors=[])
+
+    assert "applied: `delete`" in fallback_channel.messages[0]
+    skipped = _evaluation(message, config=config, result=None)
+    assert discord._mod_log_text(message, skipped, applied=[], errors=[]) == (
+        "nemoguardian skipped a message."
+    )
+
+
+async def test_discord_permission_gate_and_format_helpers():
+    allowed = FakeInteraction(manage_guild=True)
+    denied = FakeInteraction(manage_guild=False)
+    values = {"456"}
+    skipped = ModerationEvaluation(
+        context=discord._context_from_message(FakeDiscordMessage("")),
+        config=BotConfig.default(Platform.DISCORD, "123"),
+        result=None,
+        plan=ModerationPlan(action=ModerationAction.ALLOW, reason="disabled"),
+        skipped=True,
+        skip_reason="disabled",
+    )
+
+    assert await discord._require_manage_guild(allowed) is True
+    assert await discord._require_manage_guild(denied) is False
+    assert "Manage Server permission" in denied.response.messages[0]["text"]
+    discord._toggle_id(values, "456", enabled=False)
+    assert values == set()
+    assert discord._test_text(skipped) == "Skipped: `disabled`"
+    assert discord._format_counts({}) == "none"
+    assert discord._safe_since_hours(None) is None
+    assert discord._safe_since_hours(-5) == 0.0
+    assert discord._safe_since_hours(24 * 400) == 24 * 365
+    assert discord._format_score("bad") == "unknown"
+    assert discord._format_latency_ms(None) == "unknown"
+    assert discord._format_latency_ms(1500) == "1.50s"
+
+
+def test_discord_run_bot_requires_token(monkeypatch):
+    monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
+
+    with pytest.raises(RuntimeError, match="DISCORD_BOT_TOKEN env var required"):
+        discord.run_bot()
+
+
+def test_discord_run_bot_starts_built_bot(monkeypatch):
+    class FakeRunnableBot:
+        def __init__(self) -> None:
+            self.tokens: list[str] = []
+
+        def run(self, token: str) -> None:
+            self.tokens.append(token)
+
+    bot = FakeRunnableBot()
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "discord-test-token")
+    monkeypatch.setattr(discord, "build_bot", lambda: bot)
+
+    discord.run_bot()
+
+    assert bot.tokens == ["discord-test-token"]
+
+
+async def test_discord_build_bot_registers_and_runs_admin_commands(monkeypatch, tmp_path):
+    _install_fake_discord(monkeypatch)
+    config_store = ConfigStore(tmp_path / "slash-config.json")
+    audit_log = AuditLog(tmp_path / "slash-audit.jsonl")
+    handled_messages: list[Any] = []
+    recorded_tests: list[tuple[ModerationEvaluation, str]] = []
+
+    async def fake_handler(message) -> None:
+        handled_messages.append(message)
+
+    class FakeModerationEngine:
+        def __init__(self, *args, **kwargs) -> None:
+            self.audit_log = kwargs.get("audit_log")
+
+        def evaluate(self, context, config):
+            result = ModerateResponse(
+                verdict=VerdictLabel.SAFE,
+                score=0.1,
+                reasons=["ok"],
+                categories=[],
+                matched_policy_rule=None,
+                model_verdicts={},
+                total_latency_ms=12.0,
+                mode=config.mode,
+                request_id="slash-req",
+            )
+            return ModerationEvaluation(
+                context=context,
+                config=config,
+                result=result,
+                plan=ModerationPlan(action=ModerationAction.ALLOW, reason="allowed"),
+            )
+
+        def record(self, evaluation, *, execution_status: str, error: str | None = None) -> None:
+            recorded_tests.append((evaluation, execution_status))
+
+    monkeypatch.setattr(discord, "ConfigStore", lambda: config_store)
+    monkeypatch.setattr(discord, "AuditLog", lambda: audit_log)
+    monkeypatch.setattr(discord, "make_handler", lambda *args, **kwargs: fake_handler)
+    monkeypatch.setattr(discord, "ModerationEngine", FakeModerationEngine)
+    monkeypatch.setenv("DISCORD_GUILD_ID", "123")
+
+    bot = discord.build_bot()
+    await bot.setup_hook()
+    monkeypatch.delenv("DISCORD_GUILD_ID", raising=False)
+    await bot.setup_hook()
+    await bot.events["on_ready"]()
+    await bot.events["on_message"](FakeDiscordMessage("hello"))
+    group = bot.tree.group
+    assert group is not None
+
+    interaction = FakeInteraction()
+    await group.commands["setup"](interaction, log_channel=SimpleNamespace(id=999))
+    await group.commands["status"](interaction)
+    await group.commands["doctor"](interaction)
+    await group.commands["mode"](interaction, mode=SimpleNamespace(value="fast"))
+    await group.commands["policy"](interaction, text="block spam and scams")
+    await group.commands["log_channel"](interaction, channel=SimpleNamespace(id=777))
+    await group.commands["dry_run"](interaction, enabled=True)
+    await group.commands["enabled"](interaction, enabled=False)
+    await group.commands["actions"](
+        interaction,
+        delete_unsafe=False,
+        public_warning=False,
+        react_controversial=False,
+        dm_users=True,
+    )
+    await group.commands["timeout"](interaction, enabled=True, seconds=30)
+    await group.commands["ignore_channel"](interaction, channel=SimpleNamespace(id=456), ignored=True)
+    await group.commands["ignore_role"](interaction, role=SimpleNamespace(id=111), ignored=True)
+    await group.commands["exempt_user"](interaction, user=SimpleNamespace(id=42), exempt=True)
+    await group.commands["case"](interaction, case_id=" missing ")
+    await group.commands["history"](interaction, limit=99, since_hours=-1)
+    await group.commands["stats"](interaction, limit=999, since_hours=24 * 400)
+    await group.commands["failures"](interaction, limit=99, since_hours=2)
+    await group.commands["dry_run_cases"](interaction, limit=99, since_hours=2)
+    await group.commands["errors"](interaction, limit=99, case_limit=9999, since_hours=2)
+    await group.commands["slow_cases"](interaction, limit=99, case_limit=9999, since_hours=2)
+    await group.commands["offenders"](interaction, limit=99, case_limit=9999, since_hours=2)
+    await group.commands["channels"](interaction, limit=99, case_limit=9999, since_hours=2)
+    await group.commands["rules"](interaction, limit=99, case_limit=9999, since_hours=2)
+    await group.commands["categories"](interaction, limit=99, case_limit=9999, since_hours=2)
+    await group.commands["test"](interaction, text="hello")
+
+    config = config_store.get(Platform.DISCORD, "123")
+    assert bot.intents.guilds is True
+    assert bot.intents.message_content is True
+    assert bot.tree.copy_targets[0].id == 123
+    assert bot.tree.sync_targets[-1] is None
+    assert handled_messages[0].content == "hello"
+    assert config.enabled is False
+    assert config.mode == Mode.FAST
+    assert config.policy_text == "block spam and scams"
+    assert config.log_channel_id == "777"
+    assert config.dry_run is True
+    assert config.delete_unsafe is False
+    assert config.public_warning is False
+    assert config.react_controversial is False
+    assert config.dm_users is True
+    assert config.timeout_unsafe is True
+    assert config.timeout_seconds == 60
+    assert config.ignored_channel_ids == {"456"}
+    assert config.ignored_role_ids == {"111"}
+    assert config.exempt_user_ids == {"42"}
+    assert recorded_tests[0][1] == "slash-test"
+    assert any("nemoguardian test result" in message["text"] for message in interaction.response.messages)
+
+
 async def test_twitch_adapter_returns_delete_action(tmp_path):
     config_store, audit_log = _stores(tmp_path)
     cascade = FakeCascade(VerdictLabel.UNSAFE)
@@ -1036,6 +1553,7 @@ def test_config_store_round_trips_platform_defaults(tmp_path):
 
 def test_discord_doctor_text_reports_readiness_gaps():
     config = BotConfig.default(Platform.DISCORD, "123")
+    config.enabled = False
     config.timeout_unsafe = True
     permissions = SimpleNamespace(
         view_channel=True,
@@ -1049,6 +1567,7 @@ def test_discord_doctor_text_reports_readiness_gaps():
     text = discord._doctor_text(config, permissions, message_content_enabled=False)
 
     assert "needs attention" in text
+    assert "moderation is disabled" in text
     assert "mod-log channel is not set" in text
     assert "Send Messages" in text
     assert "Manage Messages" in text
@@ -1096,6 +1615,7 @@ def test_discord_case_and_history_text_helpers():
         "matched_policy_rule": "fake-rule",
         "request_id": "req-test",
         "created_at": "2026-06-27T00:00:00+00:00",
+        "error": "delete failed",
         "text_excerpt": "drop your SSN",
         "details": {"permalink": "https://discord.test/message/789"},
     }
@@ -1106,6 +1626,7 @@ def test_discord_case_and_history_text_helpers():
 
     assert "discord-123-789" in case_text
     assert "delete+public-warning" in case_text
+    assert "delete failed" in case_text
     assert "https://discord.test/message/789" in case_text
     assert "discord-123-789" in history_text
     assert discord._history_text([]) == "No moderation history found."
