@@ -263,6 +263,92 @@ def test_bot_audit_cli_stats_history_and_offenders(tmp_path):
     audit = AuditLog(path)
     audit.append(
         AuditRecord(
+            case_id="discord-123-old-dry-run",
+            platform=Platform.DISCORD,
+            workspace_id="123",
+            channel_id="456",
+            message_id="5",
+            user_id="42",
+            username="tester",
+            action=ModerationAction.DELETE,
+            verdict=VerdictLabel.UNSAFE,
+            score=0.9,
+            mode=Mode.STANDARD,
+            categories=["PII"],
+            dry_run=True,
+            execution_status="dry-run",
+            created_at="2000-01-01T00:00:00+00:00",
+        )
+    )
+    audit.append(
+        AuditRecord(
+            case_id="discord-123-current-dry-run",
+            platform=Platform.DISCORD,
+            workspace_id="123",
+            channel_id="789",
+            message_id="6",
+            user_id="77",
+            username="repeat",
+            action=ModerationAction.FLAG,
+            verdict=VerdictLabel.CONTROVERSIAL,
+            score=0.7,
+            mode=Mode.STANDARD,
+            categories=["harassment"],
+            dry_run=True,
+            execution_status="dry-run",
+        )
+    )
+    audit.append(
+        AuditRecord(
+            case_id="discord-123-allowed-dry-run",
+            platform=Platform.DISCORD,
+            workspace_id="123",
+            channel_id="789",
+            message_id="7",
+            user_id="77",
+            username="repeat",
+            action=ModerationAction.ALLOW,
+            verdict=VerdictLabel.SAFE,
+            score=0.01,
+            mode=Mode.STANDARD,
+            dry_run=True,
+            execution_status="allowed",
+        )
+    )
+
+    dry_runs = _run(
+        "bot-audit",
+        "dry-runs",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+    )
+    assert dry_runs.exit_code == 0
+    dry_runs_body = json.loads(dry_runs.stdout)
+    assert [record["case_id"] for record in dry_runs_body] == [
+        "discord-123-current-dry-run",
+        "discord-123-old-dry-run",
+    ]
+
+    windowed_dry_runs = _run(
+        "bot-audit",
+        "dry-runs",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+        "--since-hours",
+        "1",
+    )
+    assert windowed_dry_runs.exit_code == 0
+    windowed_dry_runs_body = json.loads(windowed_dry_runs.stdout)
+    assert [record["case_id"] for record in windowed_dry_runs_body] == [
+        "discord-123-current-dry-run"
+    ]
+
+    audit.append(
+        AuditRecord(
             case_id="discord-123-old-failure",
             platform=Platform.DISCORD,
             workspace_id="123",

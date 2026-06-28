@@ -297,6 +297,83 @@ async def test_discord_audit_failures_filters_partial_and_failed_records(tmp_pat
     )
 
 
+async def test_discord_audit_dry_run_cases_filters_planned_actions(tmp_path):
+    _, audit_log = _stores(tmp_path)
+    audit_log.append(
+        AuditRecord(
+            case_id="discord-123-old-dry-run",
+            platform=Platform.DISCORD,
+            workspace_id="123",
+            channel_id="456",
+            message_id="1",
+            user_id="42",
+            username="tester",
+            action=ModerationAction.DELETE,
+            verdict=VerdictLabel.UNSAFE,
+            score=0.91,
+            mode=Mode.STANDARD,
+            categories=["PII"],
+            dry_run=True,
+            execution_status="dry-run",
+            created_at="2000-01-01T00:00:00+00:00",
+        )
+    )
+    audit_log.append(
+        AuditRecord(
+            case_id="discord-123-current-dry-run",
+            platform=Platform.DISCORD,
+            workspace_id="123",
+            channel_id="789",
+            message_id="2",
+            user_id="77",
+            username="repeat",
+            action=ModerationAction.TIMEOUT,
+            verdict=VerdictLabel.UNSAFE,
+            score=0.88,
+            mode=Mode.STANDARD,
+            categories=["harassment"],
+            dry_run=True,
+            execution_status="dry-run",
+        )
+    )
+    audit_log.append(
+        AuditRecord(
+            case_id="discord-123-allowed-dry-run",
+            platform=Platform.DISCORD,
+            workspace_id="123",
+            channel_id="789",
+            message_id="3",
+            user_id="77",
+            username="repeat",
+            action=ModerationAction.ALLOW,
+            verdict=VerdictLabel.SAFE,
+            score=0.01,
+            mode=Mode.STANDARD,
+            dry_run=True,
+            execution_status="allowed",
+        )
+    )
+
+    records = audit_log.dry_run_cases(Platform.DISCORD, "123", limit=5)
+    text = discord._dry_run_cases_text(records)
+    windowed = audit_log.dry_run_cases(Platform.DISCORD, "123", limit=5, since=since_hours_ago(1))
+
+    assert [record["case_id"] for record in records] == [
+        "discord-123-current-dry-run",
+        "discord-123-old-dry-run",
+    ]
+    assert [record["case_id"] for record in windowed] == ["discord-123-current-dry-run"]
+    assert "timeout/unsafe" in text
+    assert "categories `harassment`" in text
+    assert "(last 2h)" in discord._dry_run_cases_text(records, since_hours=2)
+    assert discord._dry_run_cases_text([]) == (
+        "**nemoguardian dry-run cases**\nNo dry-run action cases found."
+    )
+    assert discord._dry_run_cases_text([], since_hours=2) == (
+        "**nemoguardian dry-run cases** (last 2h)\nNo dry-run action cases found."
+    )
+
+
 async def test_discord_audit_top_errors_groups_recurring_execution_errors(tmp_path):
     _, audit_log = _stores(tmp_path)
     audit_log.append(
@@ -379,6 +456,7 @@ async def test_discord_build_bot_registers_slash_commands():
             "history",
             "stats",
             "failures",
+            "dry_run_cases",
             "errors",
             "offenders",
             "channels",

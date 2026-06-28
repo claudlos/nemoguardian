@@ -145,6 +145,24 @@ def audit_failures(
     _echo_json(records)
 
 
+@audit_app.command("dry-runs")
+def audit_dry_runs(
+    workspace_id: str = typer.Option(..., "--workspace-id", help="Platform workspace/guild/channel ID."),
+    platform: Platform = typer.Option(Platform.DISCORD, "--platform", help="Bot platform."),
+    limit: int = typer.Option(10, "--limit", min=1, max=100, help="Maximum dry-run action cases to print."),
+    since_hours: float | None = typer.Option(None, "--since-hours", min=0.0, help="Only include newer cases."),
+    path: Path | None = typer.Option(None, "--path", help="Audit JSONL path."),
+) -> None:
+    """Print dry-run cases that would take moderation action as JSON."""
+    records = AuditLog(path).dry_run_cases(
+        platform,
+        workspace_id,
+        limit=limit,
+        since=since_hours_ago(since_hours),
+    )
+    _echo_json(records)
+
+
 @audit_app.command("errors")
 def audit_errors(
     workspace_id: str = typer.Option(..., "--workspace-id", help="Platform workspace/guild/channel ID."),

@@ -419,6 +419,28 @@ def build_bot():
             ephemeral=True,
         )
 
+    @group.command(name="dry_run_cases", description="Show dry-run cases that would take moderation action.")
+    @app_commands.default_permissions(manage_guild=True)
+    async def dry_run_cases(
+        interaction,
+        limit: int = 10,
+        since_hours: float | None = None,
+    ) -> None:
+        if not await _require_manage_guild(interaction):
+            return
+        safe_limit = max(1, min(limit, 20))
+        safe_since = _safe_since_hours(since_hours)
+        records = audit_log.dry_run_cases(
+            Platform.DISCORD,
+            str(interaction.guild_id),
+            limit=safe_limit,
+            since=since_hours_ago(safe_since),
+        )
+        await interaction.response.send_message(
+            _dry_run_cases_text(records, since_hours=safe_since),
+            ephemeral=True,
+        )
+
     @group.command(name="errors", description="Show recurring moderation execution errors.")
     @app_commands.default_permissions(manage_guild=True)
     async def errors(
@@ -863,6 +885,24 @@ def _failures_text(records: list[dict[str, Any]], *, since_hours: float | None =
             f"user `{record.get('user_id', 'unknown')}` "
             f"channel <#{record.get('channel_id', 'unknown')}> "
             f"error `{error}`"
+        )
+    return "\n".join(lines)
+
+
+def _dry_run_cases_text(records: list[dict[str, Any]], *, since_hours: float | None = None) -> str:
+    if not records:
+        return f"**nemoguardian dry-run cases**{_window_text(since_hours)}\nNo dry-run action cases found."
+
+    lines = [f"**nemoguardian dry-run cases**{_window_text(since_hours)}"]
+    for record in records[:20]:
+        categories = ", ".join(record.get("categories") or []) or "none"
+        lines.append(
+            f"`{record.get('case_id', 'unknown')}` "
+            f"{record.get('action', 'unknown')}/{record.get('verdict', 'unknown')} "
+            f"score `{_format_score(record.get('score'))}` "
+            f"user `{record.get('user_id', 'unknown')}` "
+            f"channel <#{record.get('channel_id', 'unknown')}> "
+            f"categories `{categories}`"
         )
     return "\n".join(lines)
 

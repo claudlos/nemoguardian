@@ -142,6 +142,33 @@ class AuditLog:
                 break
         return matches
 
+    def dry_run_cases(
+        self,
+        platform: Platform | str,
+        workspace_id: str,
+        *,
+        limit: int = 10,
+        since: dt.datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+        platform_value = Platform(platform).value
+        workspace_value = str(workspace_id)
+        matches = []
+        for record in reversed(self._read_records()):
+            if record.get("platform") != platform_value:
+                continue
+            if str(record.get("workspace_id")) != workspace_value:
+                continue
+            if since is not None and not _record_at_or_after(record, since):
+                continue
+            if not _is_dry_run_action_record(record):
+                continue
+            matches.append(record)
+            if len(matches) >= limit:
+                break
+        return matches
+
     def top_errors(
         self,
         platform: Platform | str,
@@ -490,6 +517,10 @@ def _count_field(records: list[dict[str, Any]], field_name: str) -> Counter[str]
 
 def _is_failure_record(record: dict[str, Any]) -> bool:
     return bool(record.get("error") or record.get("execution_status") in {"failed", "partial"})
+
+
+def _is_dry_run_action_record(record: dict[str, Any]) -> bool:
+    return bool(record.get("dry_run") and str(record.get("action") or "allow") != "allow")
 
 
 def _record_errors(record: dict[str, Any]) -> list[str]:
