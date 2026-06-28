@@ -1,4 +1,4 @@
-.PHONY: install-dev lint test verify serve smoke smoke-deep demo-check framework-smoke discord-live-smoke pre-submit-local final-submission-check docker-build docker-run
+.PHONY: install-dev lint test verify serve smoke smoke-deep demo-check framework-smoke discord-env-setup discord-live-smoke pre-submit-local final-submission-check docker-build docker-run
 
 PYTHON ?= .venv/bin/python
 PORT ?= 8000
@@ -37,6 +37,9 @@ demo-check:
 
 framework-smoke:
 	$(PYTHON) scripts/framework_smoke.py --base-url $(DEMO_BASE_URL) $(FRAMEWORK_SMOKE_FLAGS)
+
+discord-env-setup:
+	bash scripts/setup_discord_live_env.sh
 
 discord-live-smoke:
 	$(PYTHON) scripts/discord_live_smoke.py $(DISCORD_LIVE_SMOKE_FLAGS)

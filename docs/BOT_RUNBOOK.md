@@ -98,7 +98,17 @@ Recommended server channels:
 - `#nmg-mod-log` - moderation logs
 - `#nmg-control` - slash-command setup and notes
 
-Store secrets outside the repo, for example:
+Store secrets outside the repo. The easiest setup path is:
+
+```bash
+make discord-env-setup
+```
+
+The helper prompts for both bot tokens without echoing them on screen and
+validates that Discord IDs are raw `Copy ID` snowflakes before writing the env
+file.
+
+Manual setup is also supported:
 
 ```bash
 mkdir -p ~/.config/nemoguardian
