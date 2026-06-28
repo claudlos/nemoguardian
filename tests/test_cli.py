@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import sys
+from types import SimpleNamespace
 
 from typer.testing import CliRunner
 
+import nemoguardian.cli as cli_module
 from nemoguardian.bot import AuditLog, AuditRecord, ModerationAction, Platform
 from nemoguardian.cli import app
 from nemoguardian.schemas import Mode, VerdictLabel
@@ -60,6 +63,105 @@ def _seed_audit(tmp_path):
 
 def _run(*args: str):
     return runner.invoke(app, list(args))
+
+
+def test_cli_serve_invokes_uvicorn(monkeypatch):
+    captured = {}
+
+    def fake_run(app_path, **kwargs):
+        captured["app_path"] = app_path
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setitem(sys.modules, "uvicorn", SimpleNamespace(run=fake_run))
+
+    result = _run(
+        "serve",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "9999",
+        "--workers",
+        "2",
+        "--log-level",
+        "debug",
+    )
+
+    assert result.exit_code == 0
+    assert captured["app_path"] == "nemoguardian.server:app"
+    assert captured["kwargs"] == {
+        "host": "0.0.0.0",
+        "port": 9999,
+        "workers": 2,
+        "log_level": "debug",
+        "reload": False,
+    }
+
+
+def test_cli_demo_runs_cascade_with_policy_preset(monkeypatch):
+    captured = {}
+
+    class FakeCascade:
+        def __init__(self, config):
+            captured["config"] = config
+
+        def moderate(self, request, *, policy_engine=None):
+            captured["request"] = request
+            captured["policy_engine"] = policy_engine
+            return SimpleNamespace(
+                model_dump=lambda: {
+                    "verdict": "unsafe",
+                    "score": 0.91,
+                    "mode": request.mode.value,
+                }
+            )
+
+    monkeypatch.setattr(cli_module.CascadeConfig, "from_env", staticmethod(lambda: "fake-config"))
+    monkeypatch.setattr(cli_module, "Cascade", FakeCascade)
+    monkeypatch.setattr(cli_module, "get_preset", lambda preset: f"preset:{preset}")
+
+    result = _run(
+        "demo",
+        "--text",
+        "drop your SSN",
+        "--policy",
+        "block PII",
+        "--mode",
+        "standard",
+        "--preset",
+        "discord",
+    )
+
+    assert result.exit_code == 0
+    body = json.loads(result.stdout)
+    assert body == {"mode": "standard", "score": 0.91, "verdict": "unsafe"}
+    assert captured["config"] == "fake-config"
+    assert captured["request"].text == "drop your SSN"
+    assert captured["request"].policy == "block PII"
+    assert captured["request"].mode == Mode.STANDARD
+    assert captured["policy_engine"] == "preset:discord"
+
+
+def test_cli_discord_bot_invokes_adapter(monkeypatch):
+    from nemoguardian.adapters import discord as discord_adapter
+
+    called = {"run_bot": False}
+    monkeypatch.setattr(discord_adapter, "run_bot", lambda: called.update(run_bot=True))
+
+    result = _run("discord-bot")
+
+    assert result.exit_code == 0
+    assert called["run_bot"] is True
+
+
+def test_python_module_main_invokes_cli_app(monkeypatch):
+    import nemoguardian.__main__ as main_module
+
+    called = {"app": False}
+    monkeypatch.setattr(main_module, "app", lambda: called.update(app=True))
+
+    main_module.main()
+
+    assert called["app"] is True
 
 
 def test_bot_audit_cli_stats_history_and_offenders(tmp_path):
