@@ -136,6 +136,7 @@ Initial server setup:
 /nemoguardian failures limit:10 since_hours:24
 /nemoguardian dry_run_cases limit:10 since_hours:24
 /nemoguardian errors limit:5 case_limit:500 since_hours:24
+/nemoguardian slow_cases limit:5 case_limit:500 since_hours:24
 /nemoguardian offenders limit:5 case_limit:500 since_hours:24
 /nemoguardian channels limit:5 case_limit:500 since_hours:24
 /nemoguardian rules limit:5 case_limit:500 since_hours:24
@@ -159,6 +160,7 @@ nemoguardian bot-audit stats --workspace-id "$DISCORD_GUILD_ID" --live --path "$
 nemoguardian bot-audit failures --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit dry-runs --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit errors --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+nemoguardian bot-audit slow-cases --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit offenders --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit channels --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit rules --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"

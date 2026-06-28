@@ -495,6 +495,101 @@ async def test_discord_audit_top_errors_groups_recurring_execution_errors(tmp_pa
     )
 
 
+async def test_discord_audit_slow_cases_orders_by_latency(tmp_path):
+    _, audit_log = _stores(tmp_path)
+    audit_log.append(
+        AuditRecord(
+            case_id="discord-123-old-slow",
+            platform=Platform.DISCORD,
+            workspace_id="123",
+            channel_id="456",
+            message_id="1",
+            user_id="42",
+            username="tester",
+            action=ModerationAction.DELETE,
+            verdict=VerdictLabel.UNSAFE,
+            score=0.91,
+            mode=Mode.STANDARD,
+            latency_ms=1500.0,
+            execution_status="delete",
+            created_at="2000-01-01T00:00:00+00:00",
+        )
+    )
+    audit_log.append(
+        AuditRecord(
+            case_id="discord-123-current-slow",
+            platform=Platform.DISCORD,
+            workspace_id="123",
+            channel_id="789",
+            message_id="2",
+            user_id="77",
+            username="repeat",
+            action=ModerationAction.FLAG,
+            verdict=VerdictLabel.CONTROVERSIAL,
+            score=0.72,
+            mode=Mode.STANDARD,
+            latency_ms=900.0,
+            execution_status="reaction",
+        )
+    )
+    audit_log.append(
+        AuditRecord(
+            case_id="discord-123-current-fast",
+            platform=Platform.DISCORD,
+            workspace_id="123",
+            channel_id="789",
+            message_id="3",
+            user_id="77",
+            username="repeat",
+            action=ModerationAction.ALLOW,
+            verdict=VerdictLabel.SAFE,
+            score=0.01,
+            mode=Mode.STANDARD,
+            latency_ms=120.0,
+            execution_status="allowed",
+        )
+    )
+    audit_log.append(
+        AuditRecord(
+            case_id="discord-123-missing-latency",
+            platform=Platform.DISCORD,
+            workspace_id="123",
+            channel_id="789",
+            message_id="4",
+            user_id="77",
+            username="repeat",
+            action=ModerationAction.ALLOW,
+            verdict=VerdictLabel.SAFE,
+            score=0.01,
+            mode=Mode.STANDARD,
+            execution_status="allowed",
+        )
+    )
+
+    rows = audit_log.slow_cases(Platform.DISCORD, "123", limit=3, case_limit=10)
+    windowed = audit_log.slow_cases(Platform.DISCORD, "123", limit=3, case_limit=10, since=since_hours_ago(1))
+    text = discord._slow_cases_text(rows, case_limit=10)
+
+    assert [record["case_id"] for record in rows] == [
+        "discord-123-old-slow",
+        "discord-123-current-slow",
+        "discord-123-current-fast",
+    ]
+    assert [record["case_id"] for record in windowed] == [
+        "discord-123-current-slow",
+        "discord-123-current-fast",
+    ]
+    assert "latency `1.50s`" in text
+    assert "latency `900ms`" in text
+    assert "(last 2h)" in discord._slow_cases_text(rows, case_limit=10, since_hours=2)
+    assert discord._slow_cases_text([], case_limit=10) == (
+        "**nemoguardian slow cases**\nNo latency data found."
+    )
+    assert discord._slow_cases_text([], case_limit=10, since_hours=2) == (
+        "**nemoguardian slow cases** (last 2h)\nNo latency data found."
+    )
+
+
 async def test_discord_build_bot_registers_slash_commands():
     pytest.importorskip("discord")
 
@@ -522,6 +617,7 @@ async def test_discord_build_bot_registers_slash_commands():
             "failures",
             "dry_run_cases",
             "errors",
+            "slow_cases",
             "offenders",
             "channels",
             "rules",

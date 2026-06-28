@@ -31,6 +31,7 @@ def _seed_audit(tmp_path):
             mode=Mode.STANDARD,
             categories=["PII"],
             matched_policy_rule="block-pii",
+            latency_ms=400.0,
             execution_status="delete+public-warning",
             created_at="2000-01-01T00:00:00+00:00",
         )
@@ -50,6 +51,7 @@ def _seed_audit(tmp_path):
             mode=Mode.STANDARD,
             categories=["harassment"],
             matched_policy_rule="watch-harassment",
+            latency_ms=900.0,
             execution_status="reaction",
         )
     )
@@ -270,6 +272,20 @@ def test_bot_audit_cli_stats_history_and_offenders(tmp_path):
     assert categories_body[0]["category"] == "PII"
     assert categories_body[0]["total"] == 1
 
+    slow_cases = _run(
+        "bot-audit",
+        "slow-cases",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+    )
+    assert slow_cases.exit_code == 0
+    assert [record["case_id"] for record in json.loads(slow_cases.stdout)] == [
+        "discord-123-2",
+        "discord-123-1",
+    ]
+
     windowed_stats = _run(
         "bot-audit",
         "stats",
@@ -356,6 +372,21 @@ def test_bot_audit_cli_stats_history_and_offenders(tmp_path):
     windowed_categories_body = json.loads(windowed_categories.stdout)
     assert windowed_categories_body[0]["category"] == "harassment"
     assert windowed_categories_body[0]["total"] == 1
+
+    windowed_slow_cases = _run(
+        "bot-audit",
+        "slow-cases",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+        "--since-hours",
+        "1",
+    )
+    assert windowed_slow_cases.exit_code == 0
+    assert [record["case_id"] for record in json.loads(windowed_slow_cases.stdout)] == [
+        "discord-123-2"
+    ]
 
     audit = AuditLog(path)
     audit.append(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import re
 import threading
@@ -239,6 +240,27 @@ class AuditLog:
             )
         rows.sort(key=lambda entry: (-entry["total"], -entry["failed"], entry["error"]))
         return rows[:limit]
+
+    def slow_cases(
+        self,
+        platform: Platform | str,
+        workspace_id: str,
+        *,
+        limit: int = 10,
+        case_limit: int = 500,
+        since: dt.datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0 or case_limit <= 0:
+            return []
+        records = self.history(platform, workspace_id, limit=case_limit, since=since)
+        rows: list[tuple[float, int, dict[str, Any]]] = []
+        for index, record in enumerate(records):
+            latency_ms = _record_latency_ms(record)
+            if latency_ms is None:
+                continue
+            rows.append((latency_ms, index, record))
+        rows.sort(key=lambda row: (-row[0], row[1]))
+        return [record for _, _, record in rows[:limit]]
 
     def summary(
         self,
@@ -580,6 +602,16 @@ def _record_matches_rule(record: dict[str, Any], rule: str) -> bool:
 
 def _record_field_matches(record: dict[str, Any], field_name: str, value: str) -> bool:
     return str(record.get(field_name) or "unknown") == value
+
+
+def _record_latency_ms(record: dict[str, Any]) -> float | None:
+    try:
+        latency_ms = float(record.get("latency_ms"))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(latency_ms) or latency_ms < 0:
+        return None
+    return latency_ms
 
 
 def _record_errors(record: dict[str, Any]) -> list[str]:

@@ -490,6 +490,31 @@ def build_bot():
             ephemeral=True,
         )
 
+    @group.command(name="slow_cases", description="Show moderation cases with the highest cascade latency.")
+    @app_commands.default_permissions(manage_guild=True)
+    async def slow_cases(
+        interaction,
+        limit: int = 5,
+        case_limit: int = 500,
+        since_hours: float | None = None,
+    ) -> None:
+        if not await _require_manage_guild(interaction):
+            return
+        safe_limit = max(1, min(limit, 20))
+        safe_case_limit = max(1, min(case_limit, 1_000))
+        safe_since = _safe_since_hours(since_hours)
+        records = audit_log.slow_cases(
+            Platform.DISCORD,
+            str(interaction.guild_id),
+            limit=safe_limit,
+            case_limit=safe_case_limit,
+            since=since_hours_ago(safe_since),
+        )
+        await interaction.response.send_message(
+            _slow_cases_text(records, case_limit=safe_case_limit, since_hours=safe_since),
+            ephemeral=True,
+        )
+
     @group.command(name="offenders", description="Show users with the most recent moderation cases.")
     @app_commands.default_permissions(manage_guild=True)
     async def offenders(
@@ -963,6 +988,28 @@ def _errors_text(
     return "\n".join(lines)
 
 
+def _slow_cases_text(
+    records: list[dict[str, Any]],
+    *,
+    case_limit: int,
+    since_hours: float | None = None,
+) -> str:
+    if not records:
+        return f"**nemoguardian slow cases**{_window_text(since_hours)}\nNo latency data found."
+
+    lines = [f"**nemoguardian slow cases**{_window_text(since_hours)}\nlast `{case_limit}` cases"]
+    for record in records[:20]:
+        lines.append(
+            f"`{record.get('case_id', 'unknown')}` "
+            f"latency `{_format_latency_ms(record.get('latency_ms'))}` "
+            f"{record.get('action', 'unknown')}/{record.get('verdict', 'unknown')} "
+            f"user `{record.get('user_id', 'unknown')}` "
+            f"channel <#{record.get('channel_id', 'unknown')}> "
+            f"status `{record.get('execution_status', 'unknown')}`"
+        )
+    return "\n".join(lines)
+
+
 def _format_counts(counts: dict[str, int], limit: int = 8) -> str:
     if not counts:
         return "none"
@@ -1079,6 +1126,16 @@ def _format_score(value: Any) -> str:
         return f"{float(value):.2f}"
     except (TypeError, ValueError):
         return "unknown"
+
+
+def _format_latency_ms(value: Any) -> str:
+    try:
+        latency_ms = float(value)
+    except (TypeError, ValueError):
+        return "unknown"
+    if latency_ms >= 1_000:
+        return f"{latency_ms / 1_000:.2f}s"
+    return f"{latency_ms:.0f}ms"
 
 
 if __name__ == "__main__":
