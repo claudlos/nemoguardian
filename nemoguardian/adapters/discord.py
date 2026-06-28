@@ -393,6 +393,28 @@ def build_bot():
         )
         await interaction.response.send_message(_stats_text(summary, since_hours=safe_since), ephemeral=True)
 
+    @group.command(name="failures", description="Show recent failed or partial moderation actions.")
+    @app_commands.default_permissions(manage_guild=True)
+    async def failures(
+        interaction,
+        limit: int = 10,
+        since_hours: float | None = None,
+    ) -> None:
+        if not await _require_manage_guild(interaction):
+            return
+        safe_limit = max(1, min(limit, 20))
+        safe_since = _safe_since_hours(since_hours)
+        records = audit_log.failures(
+            Platform.DISCORD,
+            str(interaction.guild_id),
+            limit=safe_limit,
+            since=since_hours_ago(safe_since),
+        )
+        await interaction.response.send_message(
+            _failures_text(records, since_hours=safe_since),
+            ephemeral=True,
+        )
+
     @group.command(name="offenders", description="Show users with the most recent moderation cases.")
     @app_commands.default_permissions(manage_guild=True)
     async def offenders(
@@ -770,6 +792,24 @@ def _stats_text(summary: dict[str, Any], *, since_hours: float | None = None) ->
         f"newest: `{summary.get('newest_case_id') or 'none'}` "
         f"oldest: `{summary.get('oldest_case_id') or 'none'}`"
     )
+
+
+def _failures_text(records: list[dict[str, Any]], *, since_hours: float | None = None) -> str:
+    if not records:
+        return f"**nemoguardian failures**{_window_text(since_hours)}\nNo failed moderation actions found."
+
+    lines = [f"**nemoguardian failures**{_window_text(since_hours)}"]
+    for record in records[:20]:
+        error = str(record.get("error") or "none").replace("`", "'")[:140]
+        lines.append(
+            f"`{record.get('case_id', 'unknown')}` "
+            f"{record.get('action', 'unknown')}/{record.get('verdict', 'unknown')} "
+            f"status `{record.get('execution_status', 'unknown')}` "
+            f"user `{record.get('user_id', 'unknown')}` "
+            f"channel <#{record.get('channel_id', 'unknown')}> "
+            f"error `{error}`"
+        )
+    return "\n".join(lines)
 
 
 def _format_counts(counts: dict[str, int], limit: int = 8) -> str:

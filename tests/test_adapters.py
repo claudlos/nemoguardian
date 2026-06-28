@@ -8,7 +8,15 @@ from typing import Any
 import pytest
 
 from nemoguardian.adapters import discord, twitch, webhook
-from nemoguardian.bot import AuditLog, BotConfig, ConfigStore, Platform
+from nemoguardian.bot import (
+    AuditLog,
+    AuditRecord,
+    BotConfig,
+    ConfigStore,
+    ModerationAction,
+    Platform,
+    since_hours_ago,
+)
 from nemoguardian.bot.audit import text_hash
 from nemoguardian.schemas import Mode, ModerateResponse, VerdictLabel
 
@@ -222,6 +230,64 @@ async def test_discord_audit_summary_counts_recent_cases(tmp_path):
     )
 
 
+async def test_discord_audit_failures_filters_partial_and_failed_records(tmp_path):
+    _, audit_log = _stores(tmp_path)
+    audit_log.append(
+        AuditRecord(
+            case_id="discord-123-old-failure",
+            platform=Platform.DISCORD,
+            workspace_id="123",
+            channel_id="456",
+            message_id="1",
+            user_id="42",
+            username="tester",
+            action=ModerationAction.DELETE,
+            verdict=VerdictLabel.UNSAFE,
+            score=0.91,
+            mode=Mode.STANDARD,
+            execution_status="failed",
+            error="delete:Forbidden",
+            created_at="2000-01-01T00:00:00+00:00",
+        )
+    )
+    audit_log.append(
+        AuditRecord(
+            case_id="discord-123-partial",
+            platform=Platform.DISCORD,
+            workspace_id="123",
+            channel_id="789",
+            message_id="2",
+            user_id="77",
+            username="repeat",
+            action=ModerationAction.TIMEOUT,
+            verdict=VerdictLabel.UNSAFE,
+            score=0.88,
+            mode=Mode.STANDARD,
+            execution_status="partial",
+            error="timeout:Forbidden",
+        )
+    )
+
+    records = audit_log.failures(Platform.DISCORD, "123", limit=5)
+    text = discord._failures_text(records)
+    windowed = audit_log.failures(Platform.DISCORD, "123", limit=5, since=since_hours_ago(1))
+
+    assert [record["case_id"] for record in records] == [
+        "discord-123-partial",
+        "discord-123-old-failure",
+    ]
+    assert [record["case_id"] for record in windowed] == ["discord-123-partial"]
+    assert "status `partial`" in text
+    assert "error `timeout:Forbidden`" in text
+    assert "(last 2h)" in discord._failures_text(records, since_hours=2)
+    assert discord._failures_text([]) == (
+        "**nemoguardian failures**\nNo failed moderation actions found."
+    )
+    assert discord._failures_text([], since_hours=2) == (
+        "**nemoguardian failures** (last 2h)\nNo failed moderation actions found."
+    )
+
+
 async def test_discord_build_bot_registers_slash_commands():
     pytest.importorskip("discord")
 
@@ -246,6 +312,7 @@ async def test_discord_build_bot_registers_slash_commands():
             "case",
             "history",
             "stats",
+            "failures",
             "offenders",
             "channels",
             "rules",

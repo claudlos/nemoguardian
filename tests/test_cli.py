@@ -203,6 +203,74 @@ def test_bot_audit_cli_stats_history_and_offenders(tmp_path):
     assert windowed_rules_body[0]["rule"] == "watch-harassment"
     assert windowed_rules_body[0]["total"] == 1
 
+    audit = AuditLog(path)
+    audit.append(
+        AuditRecord(
+            case_id="discord-123-old-failure",
+            platform=Platform.DISCORD,
+            workspace_id="123",
+            channel_id="789",
+            message_id="3",
+            user_id="77",
+            username="repeat",
+            action=ModerationAction.DELETE,
+            verdict=VerdictLabel.UNSAFE,
+            score=0.9,
+            mode=Mode.STANDARD,
+            execution_status="failed",
+            error="delete:Forbidden",
+            created_at="2000-01-01T00:00:00+00:00",
+        )
+    )
+    audit.append(
+        AuditRecord(
+            case_id="discord-123-current-failure",
+            platform=Platform.DISCORD,
+            workspace_id="123",
+            channel_id="789",
+            message_id="4",
+            user_id="77",
+            username="repeat",
+            action=ModerationAction.TIMEOUT,
+            verdict=VerdictLabel.UNSAFE,
+            score=0.9,
+            mode=Mode.STANDARD,
+            execution_status="partial",
+            error="timeout:Forbidden",
+        )
+    )
+
+    failures = _run(
+        "bot-audit",
+        "failures",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+    )
+    assert failures.exit_code == 0
+    failures_body = json.loads(failures.stdout)
+    assert [record["case_id"] for record in failures_body] == [
+        "discord-123-current-failure",
+        "discord-123-old-failure",
+    ]
+
+    windowed_failures = _run(
+        "bot-audit",
+        "failures",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+        "--since-hours",
+        "1",
+    )
+    assert windowed_failures.exit_code == 0
+    windowed_failures_body = json.loads(windowed_failures.stdout)
+    assert [record["case_id"] for record in windowed_failures_body] == [
+        "discord-123-current-failure"
+    ]
+
 
 def test_bot_audit_cli_case_lookup(tmp_path):
     path = _seed_audit(tmp_path)

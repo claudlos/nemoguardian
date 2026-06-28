@@ -123,6 +123,24 @@ def audit_stats(
     _echo_json(summary)
 
 
+@audit_app.command("failures")
+def audit_failures(
+    workspace_id: str = typer.Option(..., "--workspace-id", help="Platform workspace/guild/channel ID."),
+    platform: Platform = typer.Option(Platform.DISCORD, "--platform", help="Bot platform."),
+    limit: int = typer.Option(10, "--limit", min=1, max=100, help="Maximum failed records to print."),
+    since_hours: float | None = typer.Option(None, "--since-hours", min=0.0, help="Only include newer cases."),
+    path: Path | None = typer.Option(None, "--path", help="Audit JSONL path."),
+) -> None:
+    """Print recent failed or partial moderation actions as JSON."""
+    records = AuditLog(path).failures(
+        platform,
+        workspace_id,
+        limit=limit,
+        since=since_hours_ago(since_hours),
+    )
+    _echo_json(records)
+
+
 @audit_app.command("offenders")
 def audit_offenders(
     workspace_id: str = typer.Option(..., "--workspace-id", help="Platform workspace/guild/channel ID."),

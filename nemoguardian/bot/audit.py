@@ -111,6 +111,33 @@ class AuditLog:
                 break
         return matches
 
+    def failures(
+        self,
+        platform: Platform | str,
+        workspace_id: str,
+        *,
+        limit: int = 10,
+        since: dt.datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+        platform_value = Platform(platform).value
+        workspace_value = str(workspace_id)
+        matches = []
+        for record in reversed(self._read_records()):
+            if record.get("platform") != platform_value:
+                continue
+            if str(record.get("workspace_id")) != workspace_value:
+                continue
+            if since is not None and not _record_at_or_after(record, since):
+                continue
+            if not _is_failure_record(record):
+                continue
+            matches.append(record)
+            if len(matches) >= limit:
+                break
+        return matches
+
     def summary(
         self,
         platform: Platform | str,
@@ -136,11 +163,7 @@ class AuditLog:
             "statuses": dict(_count_field(records, "execution_status")),
             "categories": dict(category_counts),
             "dry_run": sum(1 for record in records if record.get("dry_run")),
-            "errors": sum(
-                1
-                for record in records
-                if record.get("error") or record.get("execution_status") in {"failed", "partial"}
-            ),
+            "errors": sum(1 for record in records if _is_failure_record(record)),
             "newest_case_id": records[0].get("case_id") if records else None,
             "oldest_case_id": records[-1].get("case_id") if records else None,
         }
@@ -352,6 +375,10 @@ def _ensure_aware(value: dt.datetime) -> dt.datetime:
 
 def _count_field(records: list[dict[str, Any]], field_name: str) -> Counter[str]:
     return Counter(str(record.get(field_name) or "unknown") for record in records)
+
+
+def _is_failure_record(record: dict[str, Any]) -> bool:
+    return bool(record.get("error") or record.get("execution_status") in {"failed", "partial"})
 
 
 def text_hash(text: str) -> str:
