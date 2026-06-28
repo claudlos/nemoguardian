@@ -25,6 +25,7 @@ htmlcov/
 demo-evidence*.json
 framework-evidence*.json
 bots.md
+handoffs/
 
 # Editor / OS
 .vscode/
