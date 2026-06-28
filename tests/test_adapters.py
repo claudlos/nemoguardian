@@ -166,6 +166,8 @@ async def test_discord_build_bot_registers_slash_commands():
             "policy",
             "log_channel",
             "dry_run",
+            "enabled",
+            "actions",
             "timeout",
             "ignore_channel",
             "ignore_role",
@@ -226,6 +228,40 @@ async def test_discord_adapter_skips_configured_exclusions(tmp_path):
         assert cascade.calls == []
         assert message.deleted is False
         assert audit_log.recent() == []
+
+
+async def test_discord_adapter_honors_action_toggles(tmp_path):
+    config_store, audit_log = _stores(tmp_path)
+    config = BotConfig.default(Platform.DISCORD, "123")
+    config.delete_unsafe = False
+    config.public_warning = False
+    config_store.save(config)
+    message = FakeDiscordMessage("drop your SSN")
+
+    await discord.make_handler(
+        FakeCascade(VerdictLabel.UNSAFE, categories=["PII"]),
+        config_store=config_store,
+        audit_log=audit_log,
+    )(message)
+
+    assert message.deleted is False
+    assert message.channel.messages == []
+    assert audit_log.recent()[0]["execution_status"] == "planned"
+
+    config_store, audit_log = _stores(tmp_path / "controversial")
+    config = BotConfig.default(Platform.DISCORD, "123")
+    config.react_controversial = False
+    config_store.save(config)
+    message = FakeDiscordMessage("borderline")
+
+    await discord.make_handler(
+        FakeCascade(VerdictLabel.CONTROVERSIAL),
+        config_store=config_store,
+        audit_log=audit_log,
+    )(message)
+
+    assert message.reactions == []
+    assert audit_log.recent()[0]["execution_status"] == "planned"
 
 
 async def test_twitch_adapter_returns_delete_action(tmp_path):
@@ -324,12 +360,23 @@ def test_discord_doctor_text_reports_readiness_gaps():
 
 def test_discord_status_text_includes_exclusion_controls():
     config = BotConfig.default(Platform.DISCORD, "123")
+    discord._apply_action_options(
+        config,
+        delete_unsafe=False,
+        public_warning=False,
+        react_controversial=False,
+        dm_users=True,
+    )
     config.ignored_channel_ids.add("456")
     config.ignored_role_ids.add("111")
     config.exempt_user_ids.add("42")
 
     text = discord._status_text(config)
 
+    assert "delete unsafe: `False`" in text
+    assert "public warning: `False`" in text
+    assert "react controversial: `False`" in text
+    assert "dm users: `True`" in text
     assert "ignored channels: `456`" in text
     assert "ignored roles: `111`" in text
     assert "exempt users: `42`" in text

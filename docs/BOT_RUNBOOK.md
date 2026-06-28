@@ -13,8 +13,9 @@ moderation work:
 - react to controversial messages
 - write a mod-log case
 - append a private audit record
-- expose slash commands for setup, policy, mode, dry-run, timeout, ignore/exempt
-  scopes, diagnostics, case lookup, history, and test checks
+- expose slash commands for setup, policy, mode, dry-run, enable/disable, action
+  behavior, timeout, ignore/exempt scopes, diagnostics, case lookup, history, and
+  test checks
 
 ## Discord App Setup
 
@@ -88,6 +89,8 @@ Use these in a test server first:
 /nemoguardian mode standard
 /nemoguardian policy "block PII, scams, harassment, slurs, and threats"
 /nemoguardian dry_run enabled:true
+/nemoguardian enabled enabled:true
+/nemoguardian actions delete_unsafe:true public_warning:true react_controversial:true dm_users:false
 /nemoguardian timeout enabled:true seconds:600
 /nemoguardian ignore_channel channel:#off-topic ignored:true
 /nemoguardian ignore_role role:@mods ignored:true
@@ -99,6 +102,11 @@ Use these in a test server first:
 
 `dry_run` is the safest initial deployment mode. It writes mod logs and audit
 records without deleting or timing out users.
+
+Use `/nemoguardian enabled enabled:false` to pause passive moderation without
+removing config. Use `/nemoguardian actions` to tune enforcement while rolling
+out: for example, keep `delete_unsafe:false` and `public_warning:false` during a
+silent audit, then turn deletion and warnings on after reviewing the case log.
 
 Run `/nemoguardian doctor` before recording or inviting the bot to a customer
 server. It checks the current guild config, mod-log channel, requested Message

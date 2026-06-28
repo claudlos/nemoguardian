@@ -265,6 +265,36 @@ def build_bot():
         config = config_store.update(Platform.DISCORD, str(interaction.guild_id), dry_run=enabled)
         await interaction.response.send_message(_status_text(config), ephemeral=True)
 
+    @group.command(name="enabled", description="Turn passive moderation on or off.")
+    @app_commands.default_permissions(manage_guild=True)
+    async def set_enabled(interaction, enabled: bool) -> None:
+        if not await _require_manage_guild(interaction):
+            return
+        config = config_store.update(Platform.DISCORD, str(interaction.guild_id), enabled=enabled)
+        await interaction.response.send_message(_status_text(config), ephemeral=True)
+
+    @group.command(name="actions", description="Configure moderation action behavior.")
+    @app_commands.default_permissions(manage_guild=True)
+    async def actions(
+        interaction,
+        delete_unsafe: bool | None = None,
+        public_warning: bool | None = None,
+        react_controversial: bool | None = None,
+        dm_users: bool | None = None,
+    ) -> None:
+        if not await _require_manage_guild(interaction):
+            return
+        config = config_store.get(Platform.DISCORD, str(interaction.guild_id))
+        _apply_action_options(
+            config,
+            delete_unsafe=delete_unsafe,
+            public_warning=public_warning,
+            react_controversial=react_controversial,
+            dm_users=dm_users,
+        )
+        config_store.save(config)
+        await interaction.response.send_message(_status_text(config), ephemeral=True)
+
     @group.command(name="timeout", description="Configure unsafe-message timeout behavior.")
     @app_commands.default_permissions(manage_guild=True)
     async def timeout(interaction, enabled: bool, seconds: int = 600) -> None:
@@ -463,11 +493,32 @@ def _status_text(config: BotConfig) -> str:
         f"dry run: `{config.dry_run}`\n"
         f"delete unsafe: `{config.delete_unsafe}` timeout unsafe: `{config.timeout_unsafe}` "
         f"({config.timeout_seconds}s)\n"
+        f"public warning: `{config.public_warning}` react controversial: `{config.react_controversial}` "
+        f"dm users: `{config.dm_users}`\n"
         f"ignored channels: `{_format_ids(config.ignored_channel_ids)}`\n"
         f"ignored roles: `{_format_ids(config.ignored_role_ids)}`\n"
         f"exempt users: `{_format_ids(config.exempt_user_ids)}`\n"
         f"policy: {config.policy_text}"
     )
+
+
+def _apply_action_options(
+    config: BotConfig,
+    *,
+    delete_unsafe: bool | None = None,
+    public_warning: bool | None = None,
+    react_controversial: bool | None = None,
+    dm_users: bool | None = None,
+) -> BotConfig:
+    if delete_unsafe is not None:
+        config.delete_unsafe = delete_unsafe
+    if public_warning is not None:
+        config.public_warning = public_warning
+    if react_controversial is not None:
+        config.react_controversial = react_controversial
+    if dm_users is not None:
+        config.dm_users = dm_users
+    return config
 
 
 def _toggle_id(values: set[str], value: str, *, enabled: bool) -> None:

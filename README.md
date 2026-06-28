@@ -119,6 +119,8 @@ Initial server setup:
 /nemoguardian policy "block PII, scams, harassment, slurs, and threats"
 /nemoguardian mode standard
 /nemoguardian dry_run enabled:true
+/nemoguardian enabled enabled:true
+/nemoguardian actions delete_unsafe:true public_warning:true react_controversial:true dm_users:false
 /nemoguardian ignore_channel channel:#off-topic ignored:true
 /nemoguardian ignore_role role:@mods ignored:true
 /nemoguardian exempt_user user:@trusted-member exempt:true
