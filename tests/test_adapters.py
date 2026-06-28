@@ -231,6 +231,14 @@ async def test_discord_audit_summary_counts_recent_cases(tmp_path):
     assert channel_summary["total"] == 1
     assert channel_summary["verdicts"] == {"controversial": 1}
     assert "channel <#888>" in channel_text
+    category_history = audit_log.history(Platform.DISCORD, "123", category="harassment", limit=5)
+    category_summary = audit_log.summary(Platform.DISCORD, "123", category="harassment", limit=10)
+    category_text = discord._stats_text(category_summary)
+    assert [record["case_id"] for record in category_history] == [audit_log.recent()[-1]["case_id"]]
+    assert category_summary["category"] == "harassment"
+    assert category_summary["total"] == 1
+    assert category_summary["actions"] == {"flag": 1}
+    assert "category `harassment`" in category_text
     assert discord._stats_text(audit_log.summary(Platform.DISCORD, "missing")) == (
         "**nemoguardian stats**\nNo moderation cases found."
     )

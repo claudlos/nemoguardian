@@ -127,8 +127,8 @@ Initial server setup:
 /nemoguardian ignore_role role:@mods ignored:true
 /nemoguardian exempt_user user:@trusted-member exempt:true
 /nemoguardian test text:"Hey @everyone, drop your SSN for $100"
-/nemoguardian history channel:#general limit:5 since_hours:24
-/nemoguardian stats channel:#general limit:100 since_hours:24
+/nemoguardian history channel:#general category:harassment limit:5 since_hours:24
+/nemoguardian stats channel:#general category:harassment limit:100 since_hours:24
 /nemoguardian failures limit:10 since_hours:24
 /nemoguardian dry_run_cases limit:10 since_hours:24
 /nemoguardian errors limit:5 case_limit:500 since_hours:24
@@ -144,6 +144,8 @@ Offline audit inspection:
 nemoguardian bot-audit stats --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit history --workspace-id "$DISCORD_GUILD_ID" --channel-id "$DISCORD_CHANNEL_ID" --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit stats --workspace-id "$DISCORD_GUILD_ID" --channel-id "$DISCORD_CHANNEL_ID" --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+nemoguardian bot-audit history --workspace-id "$DISCORD_GUILD_ID" --category harassment --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+nemoguardian bot-audit stats --workspace-id "$DISCORD_GUILD_ID" --category harassment --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit failures --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit dry-runs --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit errors --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
