@@ -3,13 +3,13 @@
 [![CI](https://github.com/claudlos/nemoguardian/actions/workflows/ci.yml/badge.svg)](https://github.com/claudlos/nemoguardian/actions/workflows/ci.yml)
 
 > **Multi-model LLM moderation, plug-and-play.**
-> Built on Nemotron Content Safety Reasoning + Qwen3Guard + optional Nemotron 3 Ultra triage.
+> **Built on Nemotron Content Safety Reasoning + Qwen3Guard + optional Nemotron 3 Ultra triage**
 
-**Hackathon:** Hermes Agent Accelerated Business Hackathon · NVIDIA × Stripe × Nous Research · June 30, 2026
+**Hermes Agent Accelerated Business Hackathon** · **NVIDIA × Stripe × Nous Research** 
 
 ---
 
-## What it is
+## Nemoguardian
 
 A small FastAPI service and moderation-bot foundation that classifies text as
 **safe / controversial / unsafe** by cascading two to three open-source models
@@ -131,7 +131,6 @@ Initial server setup:
 /nemoguardian stats limit:100 since_hours:24
 /nemoguardian offenders limit:5 case_limit:500 since_hours:24
 /nemoguardian channels limit:5 case_limit:500 since_hours:24
-/nemoguardian rules limit:5 case_limit:500 since_hours:24
 ```
 
 Offline audit inspection:
@@ -140,7 +139,6 @@ Offline audit inspection:
 nemoguardian bot-audit stats --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit offenders --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit channels --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
-nemoguardian bot-audit rules --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit case discord-<guild-id>-<message-id> --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 ```
 
