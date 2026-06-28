@@ -119,6 +119,16 @@ you are intentionally testing a smaller host:
 docker exec -e NEMOGUARDIAN_SMOKE_MIN_VRAM_GB=12 -it <container_id> python scripts/real_model_smoke.py
 ```
 
+Before spending time loading local guard weights, validate the API-only triage
+call:
+
+```bash
+docker exec -it <container_id> python scripts/triage_api_smoke.py --expect-verdict unsafe
+```
+
+This calls NVIDIA/OpenRouter through the same `NemotronTriage` wrapper used by
+deep mode, but it does not load Qwen3Guard or Nemotron-CSR locally.
+
 If running from a local Python environment on the host instead of Docker:
 
 ```bash
@@ -175,6 +185,15 @@ pip install -e ".[discord,twitch]"
 DISCORD_BOT_TOKEN=<secret> python -m nemoguardian.adapters.discord
 TWITCH_TOKEN=<secret> python -m nemoguardian.adapters.twitch <channel>
 ```
+
+For the Discord video path, configure multiple sender bot tokens and run:
+
+```bash
+make discord-actor-scenario DISCORD_ACTOR_SCENARIO_FLAGS="--mode standard --enforce"
+```
+
+Use `--mode deep` only after `scripts/real_model_smoke.py --deep` and
+`scripts/triage_api_smoke.py` pass on the same GPU/API environment.
 
 After the service is running, capture one evidence file for the submission:
 

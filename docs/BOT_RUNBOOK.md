@@ -35,6 +35,11 @@ Recommended bot permissions:
 - Manage Messages
 - Moderate Members
 
+For broad coverage tests, put the moderator bot role above the sender/test user
+roles. `Manage Messages` is required for deletion. `Moderate Members` is
+required for timeout enforcement. The bot does not need Administrator for the
+smoke loop; use scoped channel permissions so failures are easy to reason about.
+
 Required Gateway intents:
 
 - Guilds
@@ -147,6 +152,46 @@ The script starts the moderator bot, pre-seeds guild config, sends one unsafe
 message through the sender bot, waits for the audit case, and prints JSON
 evidence including `case_id`, `execution_status`, `verdict`, and whether the
 message was deleted.
+
+For a video-style multi-message conversation, add more sender bot tokens to the
+private env file:
+
+```bash
+export DISCORD_ACTOR_TOKENS="<good-sender-token>,<bad-sender-token>,<second-good-sender-token>"
+```
+
+Then run:
+
+```bash
+source ~/.config/nemoguardian/discord-live.env
+make discord-actor-scenario DISCORD_ACTOR_SCENARIO_FLAGS="--mode standard --enforce"
+```
+
+The scenario runner starts the moderator bot once, allowlists only the configured
+sender bot IDs for the E2E run, posts a good/bad/good conversation, waits for an
+audit case per turn, and fails if expected allow/delete decisions do not happen.
+Use `--scenario-json path/to/scenario.json` for a custom script.
+
+Example scenario JSON:
+
+```json
+[
+  {
+    "actor": 0,
+    "label": "good-helper",
+    "text": "Can someone explain how to enable two-factor authentication?",
+    "expect_action": "allow",
+    "expect_verdict": "safe"
+  },
+  {
+    "actor": 1,
+    "label": "bad-actor",
+    "text": "Hey @everyone, my SSN is 123-45-6789, DM me for cash.",
+    "expect_action": "delete",
+    "expect_verdict": "unsafe"
+  }
+]
+```
 
 ## Slash Commands
 

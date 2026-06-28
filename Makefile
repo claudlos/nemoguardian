@@ -1,4 +1,4 @@
-.PHONY: install-dev lint test verify serve smoke smoke-deep demo-check framework-smoke discord-env-setup discord-live-smoke pre-submit-local final-submission-check docker-build docker-run
+.PHONY: install-dev lint test verify serve smoke smoke-deep triage-api-smoke demo-check framework-smoke discord-env-setup discord-live-smoke discord-actor-scenario pre-submit-local final-submission-check docker-build docker-run
 
 PYTHON ?= .venv/bin/python
 PORT ?= 8000
@@ -8,6 +8,8 @@ DEMO_BASE_URL ?= http://localhost:8000
 DEMO_CHECK_FLAGS ?=
 FRAMEWORK_SMOKE_FLAGS ?=
 DISCORD_LIVE_SMOKE_FLAGS ?=
+DISCORD_ACTOR_SCENARIO_FLAGS ?=
+TRIAGE_API_SMOKE_FLAGS ?=
 FINAL_CHECK_FLAGS ?=
 
 install-dev:
@@ -32,6 +34,9 @@ smoke:
 smoke-deep:
 	$(PYTHON) scripts/real_model_smoke.py --deep
 
+triage-api-smoke:
+	$(PYTHON) scripts/triage_api_smoke.py $(TRIAGE_API_SMOKE_FLAGS)
+
 demo-check:
 	$(PYTHON) scripts/demo_host_check.py --base-url $(DEMO_BASE_URL) $(DEMO_CHECK_FLAGS)
 
@@ -43,6 +48,9 @@ discord-env-setup:
 
 discord-live-smoke:
 	$(PYTHON) scripts/discord_live_smoke.py $(DISCORD_LIVE_SMOKE_FLAGS)
+
+discord-actor-scenario:
+	$(PYTHON) scripts/discord_actor_scenario.py $(DISCORD_ACTOR_SCENARIO_FLAGS)
 
 pre-submit-local:
 	$(PYTHON) scripts/pre_submit_local.py --image $(IMAGE)

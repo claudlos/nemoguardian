@@ -6,12 +6,16 @@ import json
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 from scripts import (
     demo_host_check,
+    discord_actor_scenario,
     final_submission_check,
     framework_smoke,
     pre_submit_local,
     real_model_smoke,
+    triage_api_smoke,
 )
 
 
@@ -532,6 +536,104 @@ def test_real_model_smoke_model_profile_overrides(monkeypatch):
     assert config.triage_base_url == "https://openrouter.ai/api/v1"
     assert config.qwen_gen_4bit is False
     assert config.csr_4bit is True
+
+
+def test_triage_api_smoke_requires_provider_key(monkeypatch):
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    evidence = triage_api_smoke.run(
+        SimpleNamespace(
+            text="text",
+            policy="block PII",
+            model="triage-test",
+            base_url=None,
+            expect_verdict=None,
+        )
+    )
+
+    assert evidence == {
+        "ok": False,
+        "error": "NVIDIA_API_KEY or OPENROUTER_API_KEY is required",
+        "provider": None,
+    }
+
+
+def test_triage_api_smoke_calls_openrouter(monkeypatch):
+    calls = []
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content='{"verdict":"unsafe","score":0.92,"reasons":["PII"]}'
+                        )
+                    )
+                ]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, *, api_key, base_url):
+            self.api_key = api_key
+            self.base_url = base_url
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "openrouter-key")
+
+    evidence = triage_api_smoke.run(
+        SimpleNamespace(
+            text="my SSN is 123-45-6789",
+            policy="block PII",
+            model="triage-test",
+            base_url=None,
+            expect_verdict="unsafe",
+        )
+    )
+
+    assert evidence["ok"] is True
+    assert evidence["provider"] == "openrouter"
+    assert evidence["model"] == "triage-test"
+    assert evidence["verdict"] == "unsafe"
+    assert evidence["score"] == 0.92
+    assert evidence["error"] is None
+    assert calls[0]["model"] == "triage-test"
+
+
+def test_discord_actor_scenario_helpers(tmp_path):
+    assert discord_actor_scenario.parse_actor_tokens(" a , b ,, ") == ["a", "b"]
+    assert discord_actor_scenario.parse_actor_tokens(None) == []
+
+    default = discord_actor_scenario.load_scenario(None)
+    assert default[0]["label"] == "good-helper"
+    assert default[1]["expect_action"] == "delete"
+
+    custom_path = tmp_path / "scenario.json"
+    custom_path.write_text(json.dumps([{"actor": 4, "text": "hello"}]))
+    custom = discord_actor_scenario.load_scenario(str(custom_path))
+    assert custom == [{"actor": 4, "text": "hello"}]
+    assert discord_actor_scenario._actor_index(custom[0], 2) == 0
+
+    bad_path = tmp_path / "bad.json"
+    bad_path.write_text("{}")
+    with pytest.raises(ValueError, match="scenario JSON must be a list"):
+        discord_actor_scenario.load_scenario(str(bad_path))
+
+    failures = discord_actor_scenario._expectation_failures(
+        {"expect_action": "allow", "expect_verdict": "safe"},
+        {"action": "delete", "verdict": "unsafe"},
+        deleted=True,
+        enforce=True,
+    )
+    assert failures == [
+        "expected action allow, got delete",
+        "expected verdict safe, got unsafe",
+        "expected allowed message to remain visible, but it was deleted",
+    ]
 
 
 def _write_json(path, data):
