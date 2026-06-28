@@ -590,6 +590,82 @@ async def test_discord_audit_slow_cases_orders_by_latency(tmp_path):
     )
 
 
+async def test_discord_audit_high_scores_orders_by_score(tmp_path):
+    _, audit_log = _stores(tmp_path)
+    audit_log.append(
+        AuditRecord(
+            case_id="discord-123-old-high-score",
+            platform=Platform.DISCORD,
+            workspace_id="123",
+            channel_id="456",
+            message_id="1",
+            user_id="42",
+            username="tester",
+            action=ModerationAction.DELETE,
+            verdict=VerdictLabel.UNSAFE,
+            score=0.98,
+            mode=Mode.STANDARD,
+            categories=["PII"],
+            execution_status="delete",
+            created_at="2000-01-01T00:00:00+00:00",
+        )
+    )
+    audit_log.append(
+        AuditRecord(
+            case_id="discord-123-current-high-score",
+            platform=Platform.DISCORD,
+            workspace_id="123",
+            channel_id="789",
+            message_id="2",
+            user_id="77",
+            username="repeat",
+            action=ModerationAction.FLAG,
+            verdict=VerdictLabel.CONTROVERSIAL,
+            score=0.88,
+            mode=Mode.STANDARD,
+            categories=["harassment"],
+            execution_status="reaction",
+        )
+    )
+    audit_log.append(
+        AuditRecord(
+            case_id="discord-123-current-low-score",
+            platform=Platform.DISCORD,
+            workspace_id="123",
+            channel_id="789",
+            message_id="3",
+            user_id="77",
+            username="repeat",
+            action=ModerationAction.ALLOW,
+            verdict=VerdictLabel.SAFE,
+            score=0.03,
+            mode=Mode.STANDARD,
+            execution_status="allowed",
+        )
+    )
+
+    rows = audit_log.high_score_cases(Platform.DISCORD, "123", limit=3, case_limit=10)
+    windowed = audit_log.high_score_cases(
+        Platform.DISCORD,
+        "123",
+        limit=3,
+        case_limit=10,
+        since=since_hours_ago(1),
+    )
+
+    assert [record["case_id"] for record in rows] == [
+        "discord-123-old-high-score",
+        "discord-123-current-high-score",
+        "discord-123-current-low-score",
+    ]
+    assert [record["case_id"] for record in windowed] == [
+        "discord-123-current-high-score",
+        "discord-123-current-low-score",
+    ]
+    assert rows[0]["score"] == 0.98
+    assert rows[0]["categories"] == ["PII"]
+
+
 async def test_discord_build_bot_registers_slash_commands():
     pytest.importorskip("discord")
 

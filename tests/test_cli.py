@@ -286,6 +286,20 @@ def test_bot_audit_cli_stats_history_and_offenders(tmp_path):
         "discord-123-1",
     ]
 
+    high_scores = _run(
+        "bot-audit",
+        "high-scores",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+    )
+    assert high_scores.exit_code == 0
+    assert [record["case_id"] for record in json.loads(high_scores.stdout)] == [
+        "discord-123-1",
+        "discord-123-2",
+    ]
+
     windowed_stats = _run(
         "bot-audit",
         "stats",
@@ -385,6 +399,21 @@ def test_bot_audit_cli_stats_history_and_offenders(tmp_path):
     )
     assert windowed_slow_cases.exit_code == 0
     assert [record["case_id"] for record in json.loads(windowed_slow_cases.stdout)] == [
+        "discord-123-2"
+    ]
+
+    windowed_high_scores = _run(
+        "bot-audit",
+        "high-scores",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+        "--since-hours",
+        "1",
+    )
+    assert windowed_high_scores.exit_code == 0
+    assert [record["case_id"] for record in json.loads(windowed_high_scores.stdout)] == [
         "discord-123-2"
     ]
 

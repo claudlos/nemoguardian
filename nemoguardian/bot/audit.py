@@ -262,6 +262,27 @@ class AuditLog:
         rows.sort(key=lambda row: (-row[0], row[1]))
         return [record for _, _, record in rows[:limit]]
 
+    def high_score_cases(
+        self,
+        platform: Platform | str,
+        workspace_id: str,
+        *,
+        limit: int = 10,
+        case_limit: int = 500,
+        since: dt.datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0 or case_limit <= 0:
+            return []
+        records = self.history(platform, workspace_id, limit=case_limit, since=since)
+        rows: list[tuple[float, int, dict[str, Any]]] = []
+        for index, record in enumerate(records):
+            score = _record_score(record)
+            if score is None:
+                continue
+            rows.append((score, index, record))
+        rows.sort(key=lambda row: (-row[0], row[1]))
+        return [record for _, _, record in rows[:limit]]
+
     def summary(
         self,
         platform: Platform | str,
@@ -612,6 +633,16 @@ def _record_latency_ms(record: dict[str, Any]) -> float | None:
     if not math.isfinite(latency_ms) or latency_ms < 0:
         return None
     return latency_ms
+
+
+def _record_score(record: dict[str, Any]) -> float | None:
+    try:
+        score = float(record.get("score"))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(score):
+        return None
+    return score
 
 
 def _record_errors(record: dict[str, Any]) -> list[str]:

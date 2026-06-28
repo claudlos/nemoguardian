@@ -227,6 +227,26 @@ def audit_slow_cases(
     _echo_json(records)
 
 
+@audit_app.command("high-scores")
+def audit_high_scores(
+    workspace_id: str = typer.Option(..., "--workspace-id", help="Platform workspace/guild/channel ID."),
+    platform: Platform = typer.Option(Platform.DISCORD, "--platform", help="Bot platform."),
+    limit: int = typer.Option(10, "--limit", min=1, max=100, help="Maximum high-score cases to print."),
+    case_limit: int = typer.Option(500, "--case-limit", min=1, max=5_000, help="Recent cases to inspect."),
+    since_hours: float | None = typer.Option(None, "--since-hours", min=0.0, help="Only include newer cases."),
+    path: Path | None = typer.Option(None, "--path", help="Audit JSONL path."),
+) -> None:
+    """Print recent cases with the highest moderation scores as JSON."""
+    records = AuditLog(path).high_score_cases(
+        platform,
+        workspace_id,
+        limit=limit,
+        case_limit=case_limit,
+        since=since_hours_ago(since_hours),
+    )
+    _echo_json(records)
+
+
 @audit_app.command("offenders")
 def audit_offenders(
     workspace_id: str = typer.Option(..., "--workspace-id", help="Platform workspace/guild/channel ID."),

@@ -161,6 +161,7 @@ nemoguardian bot-audit failures --workspace-id "$DISCORD_GUILD_ID" --since-hours
 nemoguardian bot-audit dry-runs --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit errors --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit slow-cases --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+nemoguardian bot-audit high-scores --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit offenders --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit channels --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit rules --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
