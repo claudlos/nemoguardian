@@ -60,7 +60,15 @@ docker run --rm --entrypoint sh nemoguardian/self-hosted:latest \
   -c 'test -s /opt/nemoguardian/LICENSE && test -s /opt/nemoguardian/NOTICE && test -s /opt/nemoguardian/docs/THIRD_PARTY_MODELS.md && test -s /opt/nemoguardian/docs/MODEL_CATALOG.md'
 ```
 
-## 4. Discord Bot Readiness
+## 4. Billing Readiness
+
+- Billing API tests cover plans, checkout, portal, webhooks, auth, tier gates,
+  usage, and self-hosted provisioning endpoints.
+- Billing helper tests cover Stripe checkout success/fallback paths, portal
+  session creation, metered usage reporting, Stripe-error tolerance, unsupported
+  provider rejection, and on-prem/remote provisioning job completion.
+
+## 5. Discord Bot Readiness
 
 Before presenting the bot as the product surface:
 
@@ -71,7 +79,7 @@ Before presenting the bot as the product surface:
 - CLI tests cover serve/demo/Discord-bot entrypoints, offline audit case lookup, history, stats, channel/category/rule/action/verdict/status/dry-run drill-down, failure inspection, dry-run action JSON output, recurring-error JSON output, slow-case JSON output, high-score JSON output, repeat-offender JSON output, channel hotspot JSON output, policy-rule hotspot JSON output, category hotspot JSON output, and `since_hours` filters.
 - For a live Discord recording, install with `bot` + `applications.commands`, enable Message Content intent, and run `/nemoguardian setup` plus `/nemoguardian doctor` in a test server first.
 
-## 5. GPU Demo Host
+## 6. GPU Demo Host
 
 Follow `docs/VASTAI_DEMO_RUNBOOK.md`.
 
@@ -98,7 +106,7 @@ If running the service from an activated host virtualenv instead of Docker,
 make demo-check DEMO_CHECK_FLAGS="--wait-seconds 120 --require-gpu --require-triage --moderate --deep --output demo-evidence.json"
 ```
 
-## 6. Recording
+## 7. Recording
 
 Use `docs/VIDEO_SCRIPT.md`.
 
@@ -109,7 +117,7 @@ Before recording:
 - Keep the `/providers/offers` table or demo GPU table visible long enough to prove the commodity GPU cost story.
 - Do not record a final take until both real-model smoke commands pass on the GPU host.
 
-## 7. Submission Links
+## 8. Submission Links
 
 After `demo-evidence.json` and the hosted video URL exist, paste the final video
 URL into `docs/SUBMISSION_FORM.md` and run:
