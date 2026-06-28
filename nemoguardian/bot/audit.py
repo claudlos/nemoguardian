@@ -91,6 +91,9 @@ class AuditLog:
         channel_id: str | None = None,
         category: str | None = None,
         rule: str | None = None,
+        action: ModerationAction | str | None = None,
+        verdict: VerdictLabel | str | None = None,
+        status: str | None = None,
         limit: int = 10,
         since: dt.datetime | None = None,
     ) -> list[dict[str, Any]]:
@@ -102,6 +105,9 @@ class AuditLog:
         channel_value = str(channel_id) if channel_id is not None else None
         category_value = str(category) if category is not None else None
         rule_value = str(rule) if rule is not None else None
+        action_value = _filter_value(action)
+        verdict_value = _filter_value(verdict)
+        status_value = _filter_value(status)
         matches = []
         for record in reversed(self._read_records()):
             if record.get("platform") != platform_value:
@@ -115,6 +121,12 @@ class AuditLog:
             if category_value is not None and not _record_has_category(record, category_value):
                 continue
             if rule_value is not None and not _record_matches_rule(record, rule_value):
+                continue
+            if action_value is not None and not _record_field_matches(record, "action", action_value):
+                continue
+            if verdict_value is not None and not _record_field_matches(record, "verdict", verdict_value):
+                continue
+            if status_value is not None and not _record_field_matches(record, "execution_status", status_value):
                 continue
             if since is not None and not _record_at_or_after(record, since):
                 continue
@@ -234,6 +246,9 @@ class AuditLog:
         channel_id: str | None = None,
         category: str | None = None,
         rule: str | None = None,
+        action: ModerationAction | str | None = None,
+        verdict: VerdictLabel | str | None = None,
+        status: str | None = None,
         limit: int = 100,
         since: dt.datetime | None = None,
     ) -> dict[str, Any]:
@@ -244,6 +259,9 @@ class AuditLog:
             channel_id=channel_id,
             category=category,
             rule=rule,
+            action=action,
+            verdict=verdict,
+            status=status,
             limit=limit,
             since=since,
         )
@@ -257,6 +275,9 @@ class AuditLog:
             "channel_id": str(channel_id) if channel_id is not None else None,
             "category": str(category) if category is not None else None,
             "rule": str(rule) if rule is not None else None,
+            "action": _filter_value(action),
+            "verdict": _filter_value(verdict),
+            "status": _filter_value(status),
             "limit": max(0, limit),
             "since": since.isoformat() if since is not None else None,
             "total": len(records),
@@ -529,6 +550,12 @@ def _count_field(records: list[dict[str, Any]], field_name: str) -> Counter[str]
     return Counter(str(record.get(field_name) or "unknown") for record in records)
 
 
+def _filter_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(getattr(value, "value", value))
+
+
 def _is_failure_record(record: dict[str, Any]) -> bool:
     return bool(record.get("error") or record.get("execution_status") in {"failed", "partial"})
 
@@ -543,6 +570,10 @@ def _record_has_category(record: dict[str, Any], category: str) -> bool:
 
 def _record_matches_rule(record: dict[str, Any], rule: str) -> bool:
     return str(record.get("matched_policy_rule") or "unmatched") == rule
+
+
+def _record_field_matches(record: dict[str, Any], field_name: str, value: str) -> bool:
+    return str(record.get(field_name) or "unknown") == value
 
 
 def _record_errors(record: dict[str, Any]) -> list[str]:

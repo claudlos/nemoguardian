@@ -359,6 +359,9 @@ def build_bot():
         channel: discord.TextChannel | None = None,
         category: str | None = None,
         rule: str | None = None,
+        action: str | None = None,
+        verdict: str | None = None,
+        status: str | None = None,
         limit: int = 5,
         since_hours: float | None = None,
     ) -> None:
@@ -373,6 +376,9 @@ def build_bot():
             channel_id=str(channel.id) if channel is not None else None,
             category=category,
             rule=rule,
+            action=action,
+            verdict=verdict,
+            status=status,
             limit=safe_limit,
             since=since_hours_ago(safe_since),
         )
@@ -386,6 +392,9 @@ def build_bot():
         channel: discord.TextChannel | None = None,
         category: str | None = None,
         rule: str | None = None,
+        action: str | None = None,
+        verdict: str | None = None,
+        status: str | None = None,
         limit: int = 100,
         since_hours: float | None = None,
     ) -> None:
@@ -400,6 +409,9 @@ def build_bot():
             channel_id=str(channel.id) if channel is not None else None,
             category=category,
             rule=rule,
+            action=action,
+            verdict=verdict,
+            status=status,
             limit=safe_limit,
             since=since_hours_ago(safe_since),
         )
@@ -866,10 +878,14 @@ def _stats_text(summary: dict[str, Any], *, since_hours: float | None = None) ->
     channel_scope = f" channel <#{summary['channel_id']}>" if summary.get("channel_id") else ""
     category_scope = f" category `{summary['category']}`" if summary.get("category") else ""
     rule_scope = f" rule `{summary['rule']}`" if summary.get("rule") else ""
+    action_scope = f" action `{summary['action']}`" if summary.get("action") else ""
+    verdict_scope = f" verdict `{summary['verdict']}`" if summary.get("verdict") else ""
+    status_scope = f" status `{summary['status']}`" if summary.get("status") else ""
     return (
         f"**nemoguardian stats**{_window_text(since_hours)}\n"
         f"scope: `{summary.get('platform', 'unknown')}:{summary.get('workspace_id', 'unknown')}`"
-        f"{user_scope}{channel_scope}{category_scope}{rule_scope} last `{summary.get('limit', 0)}` cases\n"
+        f"{user_scope}{channel_scope}{category_scope}{rule_scope}{action_scope}{verdict_scope}"
+        f"{status_scope} last `{summary.get('limit', 0)}` cases\n"
         f"total cases: `{summary.get('total', 0)}` dry run: `{summary.get('dry_run', 0)}` "
         f"errors: `{summary.get('errors', 0)}`\n"
         f"verdicts: `{_format_counts(summary.get('verdicts') or {})}`\n"

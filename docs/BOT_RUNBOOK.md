@@ -98,6 +98,8 @@ Use these in a test server first:
 /nemoguardian test text:"Hey @everyone, drop your SSN for $100"
 /nemoguardian history channel:#general category:harassment rule:watch-harassment limit:5 since_hours:24
 /nemoguardian stats channel:#general category:harassment rule:watch-harassment limit:100 since_hours:24
+/nemoguardian history action:delete verdict:unsafe status:delete+public-warning limit:5 since_hours:24
+/nemoguardian stats action:delete verdict:unsafe status:delete+public-warning limit:100 since_hours:24
 /nemoguardian failures limit:10 since_hours:24
 /nemoguardian dry_run_cases limit:10 since_hours:24
 /nemoguardian errors limit:5 case_limit:500 since_hours:24
@@ -126,8 +128,8 @@ failures`, `/nemoguardian dry_run_cases`, `/nemoguardian errors`,
 decisions, bot workload, failed enforcement, dry-run action plans, recurring
 execution errors, repeat offenders, hot channels, noisy policy rules, and noisy
 content categories without reading the JSONL audit file directly. Use `channel`,
-`category`, or `rule` on history and stats to drill into a hotspot channel,
-content type, or policy rule. Use `since_hours` on history, stats, failures, dry-run cases, errors,
+`category`, `rule`, `action`, `verdict`, or `status` on history and stats to drill into a hotspot channel,
+content type, policy rule, enforcement action, decision class, or execution status. Use `since_hours` on history, stats, failures, dry-run cases, errors,
 offenders, channels, rules, and categories to narrow those views to a recent
 incident window.
 
@@ -178,6 +180,8 @@ nemoguardian bot-audit history --workspace-id "$DISCORD_GUILD_ID" --category har
 nemoguardian bot-audit stats --workspace-id "$DISCORD_GUILD_ID" --category harassment --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit history --workspace-id "$DISCORD_GUILD_ID" --rule watch-harassment --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit stats --workspace-id "$DISCORD_GUILD_ID" --rule watch-harassment --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+nemoguardian bot-audit history --workspace-id "$DISCORD_GUILD_ID" --action delete --verdict unsafe --status delete+public-warning --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+nemoguardian bot-audit stats --workspace-id "$DISCORD_GUILD_ID" --action delete --verdict unsafe --status delete+public-warning --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit failures --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit dry-runs --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit errors --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"

@@ -205,6 +205,45 @@ def test_bot_audit_cli_stats_history_and_offenders(tmp_path):
     assert rule_stats_body["total"] == 1
     assert rule_stats_body["actions"] == {"flag": 1}
 
+    enforcement_history = _run(
+        "bot-audit",
+        "history",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+        "--action",
+        "delete",
+        "--verdict",
+        "unsafe",
+        "--status",
+        "delete+public-warning",
+    )
+    assert enforcement_history.exit_code == 0
+    assert [record["case_id"] for record in json.loads(enforcement_history.stdout)] == ["discord-123-1"]
+
+    enforcement_stats = _run(
+        "bot-audit",
+        "stats",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+        "--action",
+        "delete",
+        "--verdict",
+        "unsafe",
+        "--status",
+        "delete+public-warning",
+    )
+    assert enforcement_stats.exit_code == 0
+    enforcement_stats_body = json.loads(enforcement_stats.stdout)
+    assert enforcement_stats_body["action"] == "delete"
+    assert enforcement_stats_body["verdict"] == "unsafe"
+    assert enforcement_stats_body["status"] == "delete+public-warning"
+    assert enforcement_stats_body["total"] == 1
+    assert enforcement_stats_body["categories"] == {"PII": 1}
+
     rules = _run(
         "bot-audit",
         "rules",

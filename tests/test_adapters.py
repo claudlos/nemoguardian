@@ -251,6 +251,32 @@ async def test_discord_audit_summary_counts_recent_cases(tmp_path):
     assert rule_summary["total"] == 1
     assert rule_summary["actions"] == {"flag": 1}
     assert "rule `watch-harassment`" in rule_text
+    enforcement_history = audit_log.history(
+        Platform.DISCORD,
+        "123",
+        action=ModerationAction.DELETE,
+        verdict=VerdictLabel.UNSAFE,
+        status="delete+public-warning",
+        limit=5,
+    )
+    enforcement_summary = audit_log.summary(
+        Platform.DISCORD,
+        "123",
+        action=ModerationAction.DELETE,
+        verdict=VerdictLabel.UNSAFE,
+        status="delete+public-warning",
+        limit=10,
+    )
+    enforcement_text = discord._stats_text(enforcement_summary)
+    assert [record["case_id"] for record in enforcement_history] == [audit_log.recent()[0]["case_id"]]
+    assert enforcement_summary["action"] == "delete"
+    assert enforcement_summary["verdict"] == "unsafe"
+    assert enforcement_summary["status"] == "delete+public-warning"
+    assert enforcement_summary["total"] == 1
+    assert enforcement_summary["categories"] == {"PII": 1}
+    assert "action `delete`" in enforcement_text
+    assert "verdict `unsafe`" in enforcement_text
+    assert "status `delete+public-warning`" in enforcement_text
     assert discord._stats_text(audit_log.summary(Platform.DISCORD, "missing")) == (
         "**nemoguardian stats**\nNo moderation cases found."
     )
