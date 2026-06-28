@@ -100,6 +100,7 @@ Use these in a test server first:
 /nemoguardian stats limit:100 since_hours:24
 /nemoguardian offenders limit:5 case_limit:500 since_hours:24
 /nemoguardian channels limit:5 case_limit:500 since_hours:24
+/nemoguardian rules limit:5 case_limit:500 since_hours:24
 /nemoguardian case case_id:discord-<guild-id>-<message-id>
 ```
 
@@ -115,10 +116,11 @@ Run `/nemoguardian doctor` before recording or inviting the bot to a customer
 server. It checks the current guild config, mod-log channel, requested Message
 Content intent, and the bot's effective channel permissions. `/nemoguardian
 history`, `/nemoguardian case`, `/nemoguardian stats`, `/nemoguardian
-offenders`, and `/nemoguardian channels` give moderators a quick way to inspect
-recent decisions, bot workload, repeat offenders, and hot channels without
-reading the JSONL audit file directly. Use `since_hours` on history, stats,
-offenders, and channels to narrow those views to a recent incident window.
+offenders`, `/nemoguardian channels`, and `/nemoguardian rules` give moderators
+a quick way to inspect recent decisions, bot workload, repeat offenders, hot
+channels, and noisy policy rules without reading the JSONL audit file directly.
+Use `since_hours` on history, stats, offenders, channels, and rules to narrow
+those views to a recent incident window.
 
 Use the ignore/exempt commands to keep moderation noise down in trusted or
 irrelevant scopes:
@@ -163,6 +165,7 @@ nemoguardian bot-audit history --workspace-id "$DISCORD_GUILD_ID" --since-hours 
 nemoguardian bot-audit stats --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit offenders --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit channels --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+nemoguardian bot-audit rules --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit case discord-<guild-id>-<message-id> --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 ```
 

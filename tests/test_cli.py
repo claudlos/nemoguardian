@@ -30,6 +30,7 @@ def _seed_audit(tmp_path):
             score=0.91,
             mode=Mode.STANDARD,
             categories=["PII"],
+            matched_policy_rule="block-pii",
             execution_status="delete+public-warning",
             created_at="2000-01-01T00:00:00+00:00",
         )
@@ -48,6 +49,7 @@ def _seed_audit(tmp_path):
             score=0.67,
             mode=Mode.STANDARD,
             categories=["harassment"],
+            matched_policy_rule="watch-harassment",
             execution_status="reaction",
         )
     )
@@ -116,6 +118,19 @@ def test_bot_audit_cli_stats_history_and_offenders(tmp_path):
     assert channels_body[0]["channel_id"] == "456"
     assert channels_body[0]["total"] == 2
 
+    rules = _run(
+        "bot-audit",
+        "rules",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+    )
+    assert rules.exit_code == 0
+    rules_body = json.loads(rules.stdout)
+    assert rules_body[0]["rule"] == "block-pii"
+    assert rules_body[0]["total"] == 1
+
     windowed_stats = _run(
         "bot-audit",
         "stats",
@@ -172,6 +187,21 @@ def test_bot_audit_cli_stats_history_and_offenders(tmp_path):
     assert windowed_channels.exit_code == 0
     windowed_channels_body = json.loads(windowed_channels.stdout)
     assert windowed_channels_body[0]["total"] == 1
+
+    windowed_rules = _run(
+        "bot-audit",
+        "rules",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+        "--since-hours",
+        "1",
+    )
+    assert windowed_rules.exit_code == 0
+    windowed_rules_body = json.loads(windowed_rules.stdout)
+    assert windowed_rules_body[0]["rule"] == "watch-harassment"
+    assert windowed_rules_body[0]["total"] == 1
 
 
 def test_bot_audit_cli_case_lookup(tmp_path):

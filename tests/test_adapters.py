@@ -14,9 +14,16 @@ from nemoguardian.schemas import Mode, ModerateResponse, VerdictLabel
 
 
 class FakeCascade:
-    def __init__(self, verdict: VerdictLabel, *, categories: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        verdict: VerdictLabel,
+        *,
+        categories: list[str] | None = None,
+        matched_policy_rule: str | None = None,
+    ) -> None:
         self.verdict = verdict
         self.categories = categories or []
+        self.matched_policy_rule = matched_policy_rule
         self.calls: list[dict[str, Any]] = []
 
     def moderate(self, request, *, policy_engine=None):
@@ -33,7 +40,7 @@ class FakeCascade:
             score=0.9,
             reasons=["fake"],
             categories=self.categories,
-            matched_policy_rule="fake-rule" if self.categories else None,
+            matched_policy_rule=self.matched_policy_rule or ("fake-rule" if self.categories else None),
             model_verdicts={},
             total_latency_ms=1.0,
             mode=request.mode,
@@ -241,6 +248,7 @@ async def test_discord_build_bot_registers_slash_commands():
             "stats",
             "offenders",
             "channels",
+            "rules",
             "test",
         }.issubset(command_names)
     finally:
@@ -337,6 +345,53 @@ async def test_discord_audit_top_channels_orders_hotspots(tmp_path):
     )
     assert discord._channels_text([], case_limit=10, since_hours=2) == (
         "**nemoguardian channels** (last 2h)\nNo moderated channels found."
+    )
+
+
+async def test_discord_audit_top_rules_orders_policy_hotspots(tmp_path):
+    config_store, audit_log = _stores(tmp_path)
+    first = FakeDiscordMessage("drop your SSN")
+    second = FakeDiscordMessage("another unsafe message")
+    second.id = 790
+    third = FakeDiscordMessage("borderline")
+    third.id = 791
+
+    for message in (first, second):
+        await discord.make_handler(
+            FakeCascade(
+                VerdictLabel.UNSAFE,
+                categories=["PII"],
+                matched_policy_rule="block-pii",
+            ),
+            config_store=config_store,
+            audit_log=audit_log,
+        )(message)
+    await discord.make_handler(
+        FakeCascade(
+            VerdictLabel.CONTROVERSIAL,
+            categories=["harassment"],
+            matched_policy_rule="watch-harassment",
+        ),
+        config_store=config_store,
+        audit_log=audit_log,
+    )(third)
+
+    rows = audit_log.top_rules(Platform.DISCORD, "123", limit=5, case_limit=10)
+    text = discord._rules_text(rows, case_limit=10)
+
+    assert rows[0]["rule"] == "block-pii"
+    assert rows[0]["total"] == 2
+    assert rows[0]["unsafe"] == 2
+    assert rows[0]["categories"] == {"PII": 2}
+    assert rows[1]["rule"] == "watch-harassment"
+    assert "rule `block-pii`" in text
+    assert "categories `PII:2`" in text
+    assert "(last 2h)" in discord._rules_text(rows, case_limit=10, since_hours=2)
+    assert discord._rules_text([], case_limit=10) == (
+        "**nemoguardian rules**\nNo policy rules found."
+    )
+    assert discord._rules_text([], case_limit=10, since_hours=2) == (
+        "**nemoguardian rules** (last 2h)\nNo policy rules found."
     )
 
 
