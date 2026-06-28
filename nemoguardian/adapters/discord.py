@@ -152,6 +152,9 @@ def build_bot():
     from discord import app_commands
     from discord.ext import commands
 
+    globals()["discord"] = discord
+    globals()["app_commands"] = app_commands
+
     config_store = ConfigStore()
     audit_log = AuditLog()
     handler = make_handler(config_store=config_store, audit_log=audit_log)
@@ -206,6 +209,19 @@ def build_bot():
         config = config_store.get(Platform.DISCORD, str(interaction.guild_id))
         await interaction.response.send_message(_status_text(config), ephemeral=True)
 
+    @group.command(name="doctor", description="Check bot permissions, intents, and setup readiness.")
+    @app_commands.default_permissions(manage_guild=True)
+    async def doctor(interaction) -> None:
+        if not await _require_manage_guild(interaction):
+            return
+        config = config_store.get(Platform.DISCORD, str(interaction.guild_id))
+        text = _doctor_text(
+            config,
+            getattr(interaction, "app_permissions", None),
+            message_content_enabled=bool(getattr(bot.intents, "message_content", False)),
+        )
+        await interaction.response.send_message(text, ephemeral=True)
+
     @group.command(name="mode", description="Set moderation mode: fast, standard, or deep.")
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.choices(
@@ -259,6 +275,33 @@ def build_bot():
         config.timeout_seconds = max(60, min(seconds, 2_419_200))
         config_store.save(config)
         await interaction.response.send_message(_status_text(config), ephemeral=True)
+
+    @group.command(name="case", description="Look up a moderation case by case ID.")
+    @app_commands.default_permissions(manage_guild=True)
+    async def case_lookup(interaction, case_id: str) -> None:
+        if not await _require_manage_guild(interaction):
+            return
+        record = audit_log.find_case(case_id.strip())
+        if record is not None and (
+            record.get("platform") != Platform.DISCORD.value
+            or str(record.get("workspace_id")) != str(interaction.guild_id)
+        ):
+            record = None
+        await interaction.response.send_message(_case_text(record), ephemeral=True)
+
+    @group.command(name="history", description="Show recent moderation cases for this server or user.")
+    @app_commands.default_permissions(manage_guild=True)
+    async def history(interaction, user: discord.Member | None = None, limit: int = 5) -> None:
+        if not await _require_manage_guild(interaction):
+            return
+        safe_limit = max(1, min(limit, 10))
+        records = audit_log.history(
+            Platform.DISCORD,
+            str(interaction.guild_id),
+            user_id=str(user.id) if user is not None else None,
+            limit=safe_limit,
+        )
+        await interaction.response.send_message(_history_text(records), ephemeral=True)
 
     @group.command(name="test", description="Test a message against the current policy.")
     @app_commands.default_permissions(manage_guild=True)
@@ -394,6 +437,53 @@ def _status_text(config: BotConfig) -> str:
     )
 
 
+def _doctor_text(config: BotConfig, permissions: Any, *, message_content_enabled: bool) -> str:
+    required = {
+        "view_channel": "View Channel",
+        "read_message_history": "Read Message History",
+        "send_messages": "Send Messages",
+        "manage_messages": "Manage Messages",
+    }
+    recommended = {"embed_links": "Embed Links"}
+    if config.timeout_unsafe:
+        required["moderate_members"] = "Moderate Members"
+    else:
+        recommended["moderate_members"] = "Moderate Members"
+
+    missing_required = [
+        label for name, label in required.items() if not _permission_enabled(permissions, name)
+    ]
+    missing_recommended = [
+        label for name, label in recommended.items() if not _permission_enabled(permissions, name)
+    ]
+
+    issues = []
+    if not config.enabled:
+        issues.append("moderation is disabled")
+    if not config.log_channel_id:
+        issues.append("mod-log channel is not set")
+    if not message_content_enabled:
+        issues.append("Message Content intent is not requested")
+    if missing_required:
+        issues.append(f"missing required permissions: {', '.join(missing_required)}")
+
+    readiness = "ready" if not issues else "needs attention"
+    return (
+        "**nemoguardian doctor**\n"
+        f"readiness: `{readiness}`\n"
+        f"enabled: `{config.enabled}` mode: `{config.mode.value}` dry run: `{config.dry_run}`\n"
+        f"log channel: `{config.log_channel_id or 'not set'}`\n"
+        f"message content intent requested: `{message_content_enabled}`\n"
+        f"missing required permissions: `{', '.join(missing_required) or 'none'}`\n"
+        f"missing recommended permissions: `{', '.join(missing_recommended) or 'none'}`\n"
+        f"issues: `{'; '.join(issues) or 'none'}`"
+    )
+
+
+def _permission_enabled(permissions: Any, name: str) -> bool:
+    return bool(getattr(permissions, name, False))
+
+
 def _test_text(evaluation: ModerationEvaluation) -> str:
     if evaluation.result is None:
         return f"Skipped: `{evaluation.skip_reason}`"
@@ -403,6 +493,70 @@ def _test_text(evaluation: ModerationEvaluation) -> str:
         f"planned action: `{evaluation.plan.action.value}` reason: `{evaluation.plan.reason}`\n"
         f"categories: `{', '.join(evaluation.result.categories) or 'none'}`"
     )
+
+
+def _case_text(record: dict[str, Any] | None) -> str:
+    if record is None:
+        return "Case not found."
+
+    details = record.get("details") if isinstance(record.get("details"), dict) else {}
+    permalink = details.get("permalink") if details else None
+    lines = [
+        "**nemoguardian case**",
+        f"case: `{record.get('case_id', 'unknown')}`",
+        (
+            f"user: `{record.get('username', 'unknown')}` (`{record.get('user_id', 'unknown')}`) "
+            f"channel: <#{record.get('channel_id', 'unknown')}> "
+            f"message: `{record.get('message_id', 'unknown')}`"
+        ),
+        (
+            f"verdict: `{record.get('verdict', 'unknown')}` "
+            f"score: `{_format_score(record.get('score'))}` "
+            f"mode: `{record.get('mode', 'unknown')}`"
+        ),
+        (
+            f"action: `{record.get('action', 'unknown')}` "
+            f"status: `{record.get('execution_status', 'unknown')}` "
+            f"dry run: `{record.get('dry_run', False)}`"
+        ),
+        (
+            f"categories: `{', '.join(record.get('categories') or []) or 'none'}` "
+            f"rule: `{record.get('matched_policy_rule') or 'none'}` "
+            f"request: `{record.get('request_id') or 'none'}`"
+        ),
+        f"created: `{record.get('created_at', 'unknown')}`",
+    ]
+    if record.get("error"):
+        lines.append(f"error: `{record['error']}`")
+    if permalink:
+        lines.append(f"link: {permalink}")
+    if record.get("text_excerpt"):
+        lines.append(f"excerpt: {str(record['text_excerpt'])[:300]}")
+    return "\n".join(lines)
+
+
+def _history_text(records: list[dict[str, Any]]) -> str:
+    if not records:
+        return "No moderation history found."
+
+    lines = ["**nemoguardian history**"]
+    for record in records[:10]:
+        lines.append(
+            f"`{record.get('case_id', 'unknown')}` "
+            f"{record.get('action', 'unknown')}/{record.get('verdict', 'unknown')} "
+            f"score `{_format_score(record.get('score'))}` "
+            f"user `{record.get('user_id', 'unknown')}` "
+            f"channel <#{record.get('channel_id', 'unknown')}> "
+            f"status `{record.get('execution_status', 'unknown')}`"
+        )
+    return "\n".join(lines)
+
+
+def _format_score(value: Any) -> str:
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return "unknown"
 
 
 if __name__ == "__main__":

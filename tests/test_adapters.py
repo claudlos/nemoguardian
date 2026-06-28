@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
+
+import pytest
 
 from nemoguardian.adapters import discord, twitch, webhook
 from nemoguardian.bot import AuditLog, BotConfig, ConfigStore, Platform
@@ -129,6 +132,49 @@ async def test_discord_adapter_sends_mod_log_when_configured(tmp_path):
     assert "verdict: `unsafe`" in message.guild.log_channel.messages[0]
 
 
+async def test_discord_audit_log_supports_case_lookup_and_history(tmp_path):
+    config_store, audit_log = _stores(tmp_path)
+    message = FakeDiscordMessage("drop your SSN")
+
+    await discord.make_handler(
+        FakeCascade(VerdictLabel.UNSAFE, categories=["PII"]),
+        config_store=config_store,
+        audit_log=audit_log,
+    )(message)
+
+    record = audit_log.recent()[0]
+    assert audit_log.find_case(record["case_id"])["message_id"] == "789"
+    assert audit_log.find_case("missing-case") is None
+
+    history = audit_log.history(Platform.DISCORD, "123", user_id="42", limit=5)
+    assert history[0]["case_id"] == record["case_id"]
+    assert audit_log.history(Platform.DISCORD, "missing") == []
+
+
+async def test_discord_build_bot_registers_slash_commands():
+    pytest.importorskip("discord")
+
+    bot = discord.build_bot()
+    try:
+        group = bot.tree.get_commands()[0]
+        command_names = {command.name for command in group.commands}
+        assert {
+            "setup",
+            "status",
+            "doctor",
+            "mode",
+            "policy",
+            "log_channel",
+            "dry_run",
+            "timeout",
+            "case",
+            "history",
+            "test",
+        }.issubset(command_names)
+    finally:
+        await bot.close()
+
+
 async def test_discord_adapter_reacts_to_controversial_message(tmp_path):
     config_store, audit_log = _stores(tmp_path)
     message = FakeDiscordMessage("borderline")
@@ -226,3 +272,56 @@ def test_config_store_round_trips_platform_defaults(tmp_path):
     store.save(discord_config)
 
     assert store.get(Platform.DISCORD, "guild-1").ignored_channel_ids == {"123"}
+
+
+def test_discord_doctor_text_reports_readiness_gaps():
+    config = BotConfig.default(Platform.DISCORD, "123")
+    config.timeout_unsafe = True
+    permissions = SimpleNamespace(
+        view_channel=True,
+        read_message_history=True,
+        send_messages=False,
+        manage_messages=False,
+        embed_links=False,
+        moderate_members=False,
+    )
+
+    text = discord._doctor_text(config, permissions, message_content_enabled=False)
+
+    assert "needs attention" in text
+    assert "mod-log channel is not set" in text
+    assert "Send Messages" in text
+    assert "Manage Messages" in text
+    assert "Moderate Members" in text
+
+
+def test_discord_case_and_history_text_helpers():
+    record = {
+        "case_id": "discord-123-789",
+        "username": "tester",
+        "user_id": "42",
+        "channel_id": "456",
+        "message_id": "789",
+        "verdict": "unsafe",
+        "score": 0.9,
+        "mode": "standard",
+        "action": "delete",
+        "execution_status": "delete+public-warning",
+        "dry_run": False,
+        "categories": ["PII"],
+        "matched_policy_rule": "fake-rule",
+        "request_id": "req-test",
+        "created_at": "2026-06-27T00:00:00+00:00",
+        "text_excerpt": "drop your SSN",
+        "details": {"permalink": "https://discord.test/message/789"},
+    }
+
+    assert discord._case_text(None) == "Case not found."
+    case_text = discord._case_text(record)
+    history_text = discord._history_text([record])
+
+    assert "discord-123-789" in case_text
+    assert "delete+public-warning" in case_text
+    assert "https://discord.test/message/789" in case_text
+    assert "discord-123-789" in history_text
+    assert discord._history_text([]) == "No moderation history found."

@@ -115,10 +115,12 @@ Initial server setup:
 
 ```text
 /nemoguardian setup log_channel:#mod-log
+/nemoguardian doctor
 /nemoguardian policy "block PII, scams, harassment, slurs, and threats"
 /nemoguardian mode standard
 /nemoguardian dry_run enabled:true
 /nemoguardian test text:"Hey @everyone, drop your SSN for $100"
+/nemoguardian history limit:5
 ```
 
 Required Discord app setup: OAuth scopes `bot` and `applications.commands`;

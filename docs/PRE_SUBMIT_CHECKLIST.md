@@ -67,8 +67,8 @@ Before presenting the bot as the product surface:
 - `docs/BOT_RUNBOOK.md` exists and lists Discord scopes, permissions, intents, and setup commands.
 - `DISCORD_BOT_TOKEN` is only supplied through the environment or a secret manager.
 - `NEMOGUARDIAN_BOT_CONFIG_PATH` and `NEMOGUARDIAN_BOT_AUDIT_PATH` point outside the repo for live runs.
-- Adapter tests cover unsafe delete, controversial flag, bot-message ignore, mod-log output, Twitch action planning, and webhook auth.
-- For a live Discord recording, install with `bot` + `applications.commands`, enable Message Content intent, and run `/nemoguardian setup` in a test server first.
+- Adapter tests cover unsafe delete, controversial flag, bot-message ignore, mod-log output, case lookup, history, Twitch action planning, and webhook auth.
+- For a live Discord recording, install with `bot` + `applications.commands`, enable Message Content intent, and run `/nemoguardian setup` plus `/nemoguardian doctor` in a test server first.
 
 ## 5. GPU Demo Host
 

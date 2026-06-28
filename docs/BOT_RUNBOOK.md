@@ -13,7 +13,8 @@ moderation work:
 - react to controversial messages
 - write a mod-log case
 - append a private audit record
-- expose slash commands for setup, policy, mode, dry-run, timeout, and test checks
+- expose slash commands for setup, policy, mode, dry-run, timeout, diagnostics,
+  case lookup, history, and test checks
 
 ## Discord App Setup
 
@@ -83,15 +84,24 @@ Use these in a test server first:
 ```text
 /nemoguardian setup log_channel:#mod-log
 /nemoguardian status
+/nemoguardian doctor
 /nemoguardian mode standard
 /nemoguardian policy "block PII, scams, harassment, slurs, and threats"
 /nemoguardian dry_run enabled:true
 /nemoguardian timeout enabled:true seconds:600
 /nemoguardian test text:"Hey @everyone, drop your SSN for $100"
+/nemoguardian history limit:5
+/nemoguardian case case_id:discord-<guild-id>-<message-id>
 ```
 
 `dry_run` is the safest initial deployment mode. It writes mod logs and audit
 records without deleting or timing out users.
+
+Run `/nemoguardian doctor` before recording or inviting the bot to a customer
+server. It checks the current guild config, mod-log channel, requested Message
+Content intent, and the bot's effective channel permissions. `/nemoguardian
+history` and `/nemoguardian case` give moderators a quick way to inspect recent
+decisions without reading the JSONL audit file directly.
 
 ## Runtime Behavior
 

@@ -65,11 +65,49 @@ class AuditLog:
             handle.write(line + "\n")
 
     def recent(self, limit: int = 20) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+        return self._read_records()[-limit:]
+
+    def find_case(self, case_id: str) -> dict[str, Any] | None:
+        for record in reversed(self._read_records()):
+            if record.get("case_id") == case_id:
+                return record
+        return None
+
+    def history(
+        self,
+        platform: Platform | str,
+        workspace_id: str,
+        *,
+        user_id: str | None = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+        platform_value = Platform(platform).value
+        workspace_value = str(workspace_id)
+        user_value = str(user_id) if user_id is not None else None
+        matches = []
+        for record in reversed(self._read_records()):
+            if record.get("platform") != platform_value:
+                continue
+            if str(record.get("workspace_id")) != workspace_value:
+                continue
+            if user_value is not None and str(record.get("user_id")) != user_value:
+                continue
+            matches.append(record)
+            if len(matches) >= limit:
+                break
+        return matches
+
+    def _read_records(self) -> list[dict[str, Any]]:
         if not self.path.exists():
             return []
-        lines = self.path.read_text(encoding="utf-8").splitlines()
+        with self._lock:
+            lines = self.path.read_text(encoding="utf-8").splitlines()
         records = []
-        for line in lines[-limit:]:
+        for line in lines:
             try:
                 records.append(json.loads(line))
             except json.JSONDecodeError:
