@@ -312,6 +312,19 @@ def test_bot_audit_cli_stats_history_and_offenders(tmp_path):
         "discord-123-old-failure",
     ]
 
+    errors = _run(
+        "bot-audit",
+        "errors",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+    )
+    assert errors.exit_code == 0
+    errors_body = json.loads(errors.stdout)
+    assert errors_body[0]["error"] == "delete:Forbidden"
+    assert errors_body[0]["total"] == 1
+
     windowed_failures = _run(
         "bot-audit",
         "failures",
@@ -327,6 +340,21 @@ def test_bot_audit_cli_stats_history_and_offenders(tmp_path):
     assert [record["case_id"] for record in windowed_failures_body] == [
         "discord-123-current-failure"
     ]
+
+    windowed_errors = _run(
+        "bot-audit",
+        "errors",
+        "--path",
+        str(path),
+        "--workspace-id",
+        "123",
+        "--since-hours",
+        "1",
+    )
+    assert windowed_errors.exit_code == 0
+    windowed_errors_body = json.loads(windowed_errors.stdout)
+    assert windowed_errors_body[0]["error"] == "timeout:Forbidden"
+    assert windowed_errors_body[0]["total"] == 1
 
 
 def test_bot_audit_cli_case_lookup(tmp_path):

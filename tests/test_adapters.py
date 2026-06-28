@@ -297,6 +297,63 @@ async def test_discord_audit_failures_filters_partial_and_failed_records(tmp_pat
     )
 
 
+async def test_discord_audit_top_errors_groups_recurring_execution_errors(tmp_path):
+    _, audit_log = _stores(tmp_path)
+    audit_log.append(
+        AuditRecord(
+            case_id="discord-123-delete-failure",
+            platform=Platform.DISCORD,
+            workspace_id="123",
+            channel_id="456",
+            message_id="1",
+            user_id="42",
+            username="tester",
+            action=ModerationAction.DELETE,
+            verdict=VerdictLabel.UNSAFE,
+            score=0.91,
+            mode=Mode.STANDARD,
+            execution_status="failed",
+            error="delete:Forbidden",
+        )
+    )
+    audit_log.append(
+        AuditRecord(
+            case_id="discord-123-partial",
+            platform=Platform.DISCORD,
+            workspace_id="123",
+            channel_id="789",
+            message_id="2",
+            user_id="77",
+            username="repeat",
+            action=ModerationAction.TIMEOUT,
+            verdict=VerdictLabel.UNSAFE,
+            score=0.88,
+            mode=Mode.STANDARD,
+            execution_status="partial",
+            error="delete:Forbidden;timeout:Forbidden",
+        )
+    )
+
+    rows = audit_log.top_errors(Platform.DISCORD, "123", limit=5, case_limit=10)
+    text = discord._errors_text(rows, case_limit=10)
+
+    assert rows[0]["error"] == "delete:Forbidden"
+    assert rows[0]["total"] == 2
+    assert rows[0]["failed"] == 1
+    assert rows[0]["partial"] == 1
+    assert rows[0]["actions"] == {"delete": 1, "timeout": 1}
+    assert rows[1]["error"] == "timeout:Forbidden"
+    assert "error `delete:Forbidden`" in text
+    assert "channels `456:1, 789:1`" in text
+    assert "(last 2h)" in discord._errors_text(rows, case_limit=10, since_hours=2)
+    assert discord._errors_text([], case_limit=10) == (
+        "**nemoguardian errors**\nNo moderation errors found."
+    )
+    assert discord._errors_text([], case_limit=10, since_hours=2) == (
+        "**nemoguardian errors** (last 2h)\nNo moderation errors found."
+    )
+
+
 async def test_discord_build_bot_registers_slash_commands():
     pytest.importorskip("discord")
 
@@ -322,6 +379,7 @@ async def test_discord_build_bot_registers_slash_commands():
             "history",
             "stats",
             "failures",
+            "errors",
             "offenders",
             "channels",
             "rules",

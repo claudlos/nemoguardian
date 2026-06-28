@@ -142,6 +142,54 @@ class AuditLog:
                 break
         return matches
 
+    def top_errors(
+        self,
+        platform: Platform | str,
+        workspace_id: str,
+        *,
+        limit: int = 10,
+        case_limit: int = 500,
+        since: dt.datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0 or case_limit <= 0:
+            return []
+        records = self.failures(platform, workspace_id, limit=case_limit, since=since)
+        by_error: dict[str, dict[str, Any]] = {}
+        for record in records:
+            for error in _record_errors(record):
+                entry = by_error.setdefault(
+                    error,
+                    {
+                        "error": error,
+                        "total": 0,
+                        "failed": 0,
+                        "partial": 0,
+                        "actions": Counter(),
+                        "channels": Counter(),
+                        "latest_case_id": record.get("case_id"),
+                        "latest_created_at": record.get("created_at"),
+                    },
+                )
+                entry["total"] += 1
+                if record.get("execution_status") == "failed":
+                    entry["failed"] += 1
+                if record.get("execution_status") == "partial":
+                    entry["partial"] += 1
+                entry["actions"].update([str(record.get("action") or "unknown")])
+                entry["channels"].update([str(record.get("channel_id") or "unknown")])
+
+        rows = []
+        for entry in by_error.values():
+            rows.append(
+                {
+                    **entry,
+                    "actions": dict(entry["actions"]),
+                    "channels": dict(entry["channels"]),
+                }
+            )
+        rows.sort(key=lambda entry: (-entry["total"], -entry["failed"], entry["error"]))
+        return rows[:limit]
+
     def summary(
         self,
         platform: Platform | str,
@@ -442,6 +490,15 @@ def _count_field(records: list[dict[str, Any]], field_name: str) -> Counter[str]
 
 def _is_failure_record(record: dict[str, Any]) -> bool:
     return bool(record.get("error") or record.get("execution_status") in {"failed", "partial"})
+
+
+def _record_errors(record: dict[str, Any]) -> list[str]:
+    raw_error = record.get("error")
+    if isinstance(raw_error, str) and raw_error.strip():
+        errors = [error.strip() for error in raw_error.split(";") if error.strip()]
+        if errors:
+            return errors
+    return [str(record.get("execution_status") or "unknown")]
 
 
 def text_hash(text: str) -> str:

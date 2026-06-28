@@ -99,6 +99,7 @@ Use these in a test server first:
 /nemoguardian history channel:#general limit:5 since_hours:24
 /nemoguardian stats channel:#general limit:100 since_hours:24
 /nemoguardian failures limit:10 since_hours:24
+/nemoguardian errors limit:5 case_limit:500 since_hours:24
 /nemoguardian offenders limit:5 case_limit:500 since_hours:24
 /nemoguardian channels limit:5 case_limit:500 since_hours:24
 /nemoguardian rules limit:5 case_limit:500 since_hours:24
@@ -118,14 +119,14 @@ Run `/nemoguardian doctor` before recording or inviting the bot to a customer
 server. It checks the current guild config, mod-log channel, requested Message
 Content intent, and the bot's effective channel permissions. `/nemoguardian
 history`, `/nemoguardian case`, `/nemoguardian stats`, `/nemoguardian
-failures`, `/nemoguardian offenders`, `/nemoguardian channels`, and
-`/nemoguardian rules`, and `/nemoguardian categories` give moderators a quick
-way to inspect recent decisions, bot workload, failed enforcement, repeat
-offenders, hot channels, noisy policy rules, and noisy content categories
-without reading the JSONL audit file directly. Use `channel` on history and
-stats to drill into a hotspot channel. Use `since_hours` on history, stats,
-failures, offenders, channels, rules, and categories to narrow those views to a
-recent incident window.
+failures`, `/nemoguardian errors`, `/nemoguardian offenders`, `/nemoguardian
+channels`, `/nemoguardian rules`, and `/nemoguardian categories` give
+moderators a quick way to inspect recent decisions, bot workload, failed
+enforcement, recurring execution errors, repeat offenders, hot channels, noisy
+policy rules, and noisy content categories without reading the JSONL audit file
+directly. Use `channel` on history and stats to drill into a hotspot channel.
+Use `since_hours` on history, stats, failures, errors, offenders, channels,
+rules, and categories to narrow those views to a recent incident window.
 
 Use the ignore/exempt commands to keep moderation noise down in trusted or
 irrelevant scopes:
@@ -171,6 +172,7 @@ nemoguardian bot-audit stats --workspace-id "$DISCORD_GUILD_ID" --since-hours 24
 nemoguardian bot-audit history --workspace-id "$DISCORD_GUILD_ID" --channel-id "$DISCORD_CHANNEL_ID" --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit stats --workspace-id "$DISCORD_GUILD_ID" --channel-id "$DISCORD_CHANNEL_ID" --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit failures --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
+nemoguardian bot-audit errors --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit offenders --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit channels --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"
 nemoguardian bot-audit rules --workspace-id "$DISCORD_GUILD_ID" --since-hours 24 --path "$NEMOGUARDIAN_BOT_AUDIT_PATH"

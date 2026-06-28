@@ -419,6 +419,31 @@ def build_bot():
             ephemeral=True,
         )
 
+    @group.command(name="errors", description="Show recurring moderation execution errors.")
+    @app_commands.default_permissions(manage_guild=True)
+    async def errors(
+        interaction,
+        limit: int = 5,
+        case_limit: int = 500,
+        since_hours: float | None = None,
+    ) -> None:
+        if not await _require_manage_guild(interaction):
+            return
+        safe_limit = max(1, min(limit, 10))
+        safe_case_limit = max(1, min(case_limit, 1_000))
+        safe_since = _safe_since_hours(since_hours)
+        rows = audit_log.top_errors(
+            Platform.DISCORD,
+            str(interaction.guild_id),
+            limit=safe_limit,
+            case_limit=safe_case_limit,
+            since=since_hours_ago(safe_since),
+        )
+        await interaction.response.send_message(
+            _errors_text(rows, case_limit=safe_case_limit, since_hours=safe_since),
+            ephemeral=True,
+        )
+
     @group.command(name="offenders", description="Show users with the most recent moderation cases.")
     @app_commands.default_permissions(manage_guild=True)
     async def offenders(
@@ -838,6 +863,29 @@ def _failures_text(records: list[dict[str, Any]], *, since_hours: float | None =
             f"user `{record.get('user_id', 'unknown')}` "
             f"channel <#{record.get('channel_id', 'unknown')}> "
             f"error `{error}`"
+        )
+    return "\n".join(lines)
+
+
+def _errors_text(
+    rows: list[dict[str, Any]],
+    *,
+    case_limit: int,
+    since_hours: float | None = None,
+) -> str:
+    if not rows:
+        return f"**nemoguardian errors**{_window_text(since_hours)}\nNo moderation errors found."
+
+    lines = [f"**nemoguardian errors**{_window_text(since_hours)}\nlast `{case_limit}` failed cases"]
+    for index, row in enumerate(rows, start=1):
+        error = str(row.get("error", "unknown")).replace("`", "'")[:120]
+        lines.append(
+            f"{index}. error `{error}` "
+            f"cases `{row.get('total', 0)}` failed `{row.get('failed', 0)}` "
+            f"partial `{row.get('partial', 0)}` "
+            f"actions `{_format_counts(row.get('actions') or {}, limit=3)}` "
+            f"channels `{_format_counts(row.get('channels') or {}, limit=3)}` "
+            f"latest `{row.get('latest_case_id') or 'none'}`"
         )
     return "\n".join(lines)
 
