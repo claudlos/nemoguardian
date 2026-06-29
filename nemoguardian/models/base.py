@@ -12,10 +12,18 @@ and nemotron_csr.py. All models must:
 from __future__ import annotations
 
 import abc
+import threading
 import time
 from typing import Any
 
 from nemoguardian.schemas import ModelVerdict, VerdictLabel
+
+# Process-wide lock serializing first-time model loads. The cascade loads the
+# local guards concurrently, and a transformers _LazyModule does NOT tolerate
+# two threads doing their first `from transformers import ...` at once (raises
+# "cannot import name 'AutoModelForCausalLM'"). Serializing only the load keeps
+# inference fully concurrent — after warmup the fast path skips the lock.
+_LOAD_LOCK = threading.Lock()
 
 
 class ModerationModel(abc.ABC):
@@ -32,8 +40,10 @@ class ModerationModel(abc.ABC):
 
     def ensure_loaded(self) -> None:
         if not self._loaded:
-            self._load()
-            self._loaded = True
+            with _LOAD_LOCK:
+                if not self._loaded:  # double-checked: only the first thread loads
+                    self._load()
+                    self._loaded = True
 
     @abc.abstractmethod
     def _load(self) -> None:

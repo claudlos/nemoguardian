@@ -248,6 +248,26 @@ def test_moderation_model_lazy_load_success_and_error_paths():
     assert infer_error.error == "ValueError: bad inference"
 
 
+def test_ensure_loaded_is_thread_safe_single_load():
+    import threading
+
+    model = TinyModerationModel()
+    barrier = threading.Barrier(8)
+
+    def worker():
+        barrier.wait()  # maximize first-load contention
+        model.ensure_loaded()
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert model.is_loaded is True
+    assert model.load_calls == 1  # loaded exactly once despite concurrent access
+
+
 def test_qwen_parse_gen_output_extracts_label_categories_and_refusal():
     parsed = _parse_gen_output(
         "Safety: Controversial\nCategories: PII, Jailbreak, None\nRefusal: Yes"
