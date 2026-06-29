@@ -6,12 +6,30 @@ import os
 from typing import Any
 
 
+def _cuda_bf16_supported(torch_module: Any) -> bool:
+    cuda = getattr(torch_module, "cuda", None)
+    try:
+        if not (cuda is not None and cuda.is_available()):
+            return False
+    except Exception:
+        return False
+    check = getattr(cuda, "is_bf16_supported", None)
+    if check is None:
+        # No probe available: assume supported (modern CUDA) when bfloat16 exists.
+        return hasattr(torch_module, "bfloat16")
+    try:
+        return bool(check()) and hasattr(torch_module, "bfloat16")
+    except Exception:
+        return False
+
+
 def runtime_torch_dtype(torch_module: Any) -> Any:
     """Pick a dtype that works on the active runtime.
 
-    Hugging Face ``auto`` may select bfloat16 for checkpoints that advertise it,
-    but CPU inference can fail on operations that do not support bfloat16. The
-    default here is conservative: float32 on CPU and float16 on CUDA.
+    float32 on CPU (bfloat16 ops can be unsupported there). On CUDA, prefer
+    **bfloat16**: Gemma-family checkpoints (e.g. Nemotron-CSR) emit degenerate
+    all-``<pad>`` output in float16, and bf16 is equally fine for the other
+    guards on Ampere+ GPUs. Falls back to float16 if bf16 is unsupported.
     """
 
     override = os.environ.get("NEMOGUARDIAN_TORCH_DTYPE")
@@ -38,9 +56,23 @@ def runtime_torch_dtype(torch_module: Any) -> Any:
     except Exception:
         cuda_available = False
 
-    if cuda_available and hasattr(torch_module, "float16"):
-        return torch_module.float16
+    if cuda_available:
+        if _cuda_bf16_supported(torch_module):
+            return torch_module.bfloat16
+        if hasattr(torch_module, "float16"):
+            return torch_module.float16
     return getattr(torch_module, "float32", "auto")
+
+
+def bnb_compute_dtype(torch_module: Any) -> Any:
+    """4-bit compute dtype for bitsandbytes.
+
+    bf16 on capable CUDA (required for Gemma-family models like Nemotron-CSR),
+    else float16. Never float32 — 4-bit only runs on GPU.
+    """
+    if _cuda_bf16_supported(torch_module):
+        return torch_module.bfloat16
+    return getattr(torch_module, "float16", "float16")
 
 
 def dtype_kwarg_name() -> str:
@@ -80,6 +112,7 @@ def attn_impl_kwargs() -> dict[str, str]:
 
 __all__ = [
     "attn_impl_kwargs",
+    "bnb_compute_dtype",
     "dtype_kwarg_name",
     "dtype_kwargs",
     "runtime_torch_dtype",
