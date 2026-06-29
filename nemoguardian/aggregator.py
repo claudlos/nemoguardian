@@ -29,6 +29,7 @@ class AggregatorConfig:
     qwen_weight: float = 0.40
     csr_weight: float = 0.40
     triage_weight: float = 0.20
+    injection_weight: float = 0.50  # deterministic prompt-injection heuristic
     safe_threshold: float = 0.30
     unsafe_threshold: float = 0.70
     override_on_unsafe: float = 0.50  # any model over this → unsafe regardless
@@ -68,6 +69,7 @@ def aggregate(
         "qwen3_guard_stream": (cfg.qwen_weight, "Qwen3Guard-Stream"),
         "nemotron_csr": (cfg.csr_weight, "Nemotron-CSR"),
         "triage": (cfg.triage_weight, "Triage"),
+        "prompt_injection": (cfg.injection_weight, "PromptInjection"),
     }
 
     # Hard override: any model with verdict=unsafe AND score ≥ override_on_unsafe

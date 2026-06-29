@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 from nemoguardian.aggregator import AggregatedVerdict, aggregate
+from nemoguardian.detectors import heuristic_verdict
 from nemoguardian.models.nemotron_csr import NemotronCSR
 from nemoguardian.models.nemotron_triage import NemotronTriage
 from nemoguardian.models.qwen3_guard import Qwen3GuardGen, Qwen3GuardStream
@@ -192,6 +193,13 @@ class Cascade:
                 qwen_verdict=model_verdicts["qwen3_guard_gen"],
                 csr_verdict=model_verdicts["nemotron_csr"],
             )
+
+        # Deterministic prompt-injection / jailbreak detector — cheap, runs in
+        # every mode. The content guards (Qwen3Guard, Nemotron-CSR) don't treat
+        # injection as harmful content, so this folds in an escalating vote.
+        injection = heuristic_verdict(request.text)
+        if injection is not None:
+            model_verdicts["prompt_injection"] = injection
 
         aggregated: AggregatedVerdict = aggregate(model_verdicts)
         for category in _text_policy_categories(request.text):
