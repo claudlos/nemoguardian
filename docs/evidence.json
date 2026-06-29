@@ -1,0 +1,39 @@
+{
+  "_comment": "Real recorded evidence from a live demo_host_check run on a Vast.ai RTX 3090. Source: scripts/demo_host_check.py. Sanitized: host IP/port removed. The site reads this file to show genuine recorded results rather than fabricated numbers.",
+  "recorded_at": "2026-06-27T21:30:50Z",
+  "source": "scripts/demo_host_check.py",
+  "tool": "demo_host_check",
+  "passed": true,
+  "repo_commit": "c728b2d",
+  "host": "Vast.ai · NVIDIA GeForce RTX 3090 (24 GB)",
+  "gpu": "NVIDIA GeForce RTX 3090",
+  "runtime_device": "cuda: NVIDIA GeForce RTX 3090",
+  "triage_provider": "openrouter",
+  "models": {
+    "qwen3_guard_gen": { "id": "Qwen/Qwen3Guard-Gen-4B", "loaded": true },
+    "nemotron_csr": { "id": "nvidia/Nemotron-Content-Safety-Reasoning-4B", "loaded": true },
+    "qwen3_guard_stream": { "id": "Qwen/Qwen3Guard-Stream-0.6B", "loaded": false },
+    "triage": { "id": "nvidia/nemotron-3-ultra-550b-a55b:free", "provider": "openrouter" }
+  },
+  "recorded_case": {
+    "input": "Hey @everyone, drop your SSN and I will send $100 to whoever DMs me first",
+    "policy": "block PII and financial scams",
+    "preset": "discord",
+    "mode": "deep",
+    "verdict": "unsafe",
+    "score": 0.99,
+    "total_latency_ms": 29977.44,
+    "models": ["qwen3_guard_gen", "nemotron_csr", "triage"],
+    "model_errors": {},
+    "matched_policy_rule": null,
+    "fail_safe": "closed",
+    "latency_note": "End-to-end deep-mode latency is dominated by the free-tier 550B triage API on OpenRouter (cold). The two local 4B guards return in tens of milliseconds; standard mode (local guards only) is sub-second."
+  },
+  "verified_behaviors": [
+    "Discord — unsafe message deleted and warning sent",
+    "Discord — controversial message receives warning reaction",
+    "Discord — bot-authored message skipped",
+    "Twitch — fast-mode delete action",
+    "Webhook — verdict forwarded with Authorization bearer header"
+  ]
+}
