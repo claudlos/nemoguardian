@@ -30,8 +30,7 @@ or other GPU boxes.
 
 ## Local Secret Setup
 
-Keep Stripe keys outside the repo. If your private key note is at
-`/home/carlos/Documents/stripe.md`, run:
+Keep Stripe keys outside the repo.
 
 ```bash
 make stripe-env-setup
