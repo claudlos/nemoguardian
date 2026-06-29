@@ -12,6 +12,8 @@ import os
 import re
 import time
 import uuid
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 from nemoguardian.aggregator import AggregatedVerdict, aggregate
@@ -42,8 +44,9 @@ class CascadeConfig:
     triage_base_url: str | None = None
     qwen_gen_4bit: bool = True
     csr_4bit: bool = True
-    reasoning: bool = True  # Nemotron-CSR reasoning-on mode
+    reasoning: bool = True  # Nemotron-CSR reasoning-on default (deep mode)
     enable_triage: bool = True
+    concurrent_local: bool = True  # run the local guards (Qwen+CSR) in parallel
 
     @classmethod
     def from_env(cls) -> CascadeConfig:
@@ -61,6 +64,7 @@ class CascadeConfig:
             csr_4bit=_env_bool("NEMOGUARDIAN_CSR_4BIT", quantize),
             reasoning=_env_bool("NEMOGUARDIAN_REASONING", True),
             enable_triage=_env_bool("NEMOGUARDIAN_ENABLE_TRIAGE", True),
+            concurrent_local=_env_bool("NEMOGUARDIAN_CONCURRENT_LOCAL", True),
         )
 
 
@@ -159,11 +163,21 @@ class Cascade:
         if request.mode == Mode.FAST:
             if request.use_qwen_stream:
                 model_verdicts["qwen3_guard_stream"] = self._stream_document_verdict(request.text)
-        elif request.use_qwen_gen:
-            model_verdicts["qwen3_guard_gen"] = self.qwen_gen.moderate(request.text, policy=request.policy)
-
-        if request.mode != Mode.FAST and request.use_nemotron_csr:
-            model_verdicts["nemotron_csr"] = self.csr.moderate(request.text, policy=request.policy)
+        else:
+            # Standard/deep: run the local guards (independent of each other) and
+            # gather them. Reasoning-on CSR is reserved for deep mode — standard
+            # uses the fast reasoning-off path (matches the Mode contract).
+            tasks: dict[str, Callable[[], ModelVerdict]] = {}
+            if request.use_qwen_gen:
+                tasks["qwen3_guard_gen"] = lambda: self.qwen_gen.moderate(
+                    request.text, policy=request.policy
+                )
+            if request.use_nemotron_csr:
+                csr_reasoning = request.mode == Mode.DEEP and self.config.reasoning
+                tasks["nemotron_csr"] = lambda: self.csr.moderate(
+                    request.text, policy=request.policy, reasoning=csr_reasoning
+                )
+            model_verdicts.update(self._run_local_verdicts(tasks))
 
         # Triage only in DEEP mode, only when both Qwen and CSR ran.
         if (
@@ -215,6 +229,24 @@ class Cascade:
             request_id=request_id,
             timestamp=dt.datetime.now(dt.timezone.utc).isoformat(),
         )
+
+    def _run_local_verdicts(
+        self, tasks: dict[str, Callable[[], ModelVerdict]]
+    ) -> dict[str, ModelVerdict]:
+        """Run the local guard callables, concurrently when configured.
+
+        ``moderate`` calls (via ``base.ModerationModel.moderate``) never raise —
+        they surface failures through the verdict's ``error`` field — so results
+        are gathered without per-future error handling. Output order is canonical
+        (task insertion order), independent of completion order.
+        """
+        if not tasks:
+            return {}
+        if not self.config.concurrent_local or len(tasks) == 1:
+            return {key: fn() for key, fn in tasks.items()}
+        with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
+            futures = {key: pool.submit(fn) for key, fn in tasks.items()}
+            return {key: fut.result() for key, fut in futures.items()}
 
     def stream_token_verdicts(self, text: str):
         """Per-token verdicts from Qwen3Guard-Stream."""

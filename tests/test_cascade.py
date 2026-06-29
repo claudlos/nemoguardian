@@ -31,8 +31,8 @@ class StaticModel:
         self.categories = categories or []
         self.calls: list[dict] = []
 
-    def moderate(self, text: str, *, policy: str | None = None, response: str | None = None):
-        self.calls.append({"text": text, "policy": policy, "response": response})
+    def moderate(self, text: str, *, policy: str | None = None, response: str | None = None, **kwargs):
+        self.calls.append({"text": text, "policy": policy, "response": response, **kwargs})
         return ModelVerdict(
             model_id=f"static-{self.verdict.value}",
             verdict=self.verdict,
@@ -225,9 +225,66 @@ def test_standard_mode_runs_qwen_and_csr_then_policy_override():
     assert result.matched_policy_rule == "force-test-block"
     assert set(result.model_verdicts) == {"qwen3_guard_gen", "nemotron_csr"}
     assert cascade._qwen_gen.calls == [{"text": "check this", "policy": "block PII", "response": None}]
-    assert cascade._csr.calls == [{"text": "check this", "policy": "block PII", "response": None}]
+    # Standard mode runs CSR in the fast reasoning-OFF path.
+    assert cascade._csr.calls == [
+        {"text": "check this", "policy": "block PII", "response": None, "reasoning": False}
+    ]
     assert result.request_id
     assert result.timestamp
+
+
+def test_csr_reasoning_is_on_only_in_deep_mode():
+    cascade = Cascade(CascadeConfig(enable_triage=False))
+    cascade._qwen_gen = StaticModel(VerdictLabel.SAFE, score=0.05)
+    cascade._csr = StaticModel(VerdictLabel.SAFE, score=0.05)
+
+    cascade.moderate(ModerateRequest(text="x", mode=Mode.STANDARD))
+    cascade.moderate(ModerateRequest(text="y", mode=Mode.DEEP))
+
+    assert cascade._csr.calls[0]["reasoning"] is False  # standard → reasoning off
+    assert cascade._csr.calls[1]["reasoning"] is True   # deep → reasoning on
+
+
+def test_deep_csr_reasoning_respects_global_disable():
+    # If reasoning is globally disabled, even deep mode stays reasoning-off.
+    cascade = Cascade(CascadeConfig(enable_triage=False, reasoning=False))
+    cascade._qwen_gen = StaticModel(VerdictLabel.SAFE, score=0.05)
+    cascade._csr = StaticModel(VerdictLabel.SAFE, score=0.05)
+
+    cascade.moderate(ModerateRequest(text="y", mode=Mode.DEEP))
+
+    assert cascade._csr.calls[0]["reasoning"] is False
+
+
+def test_local_guards_run_concurrently_when_enabled():
+    import threading
+    import time as _time
+
+    barrier = threading.Barrier(2, timeout=5)
+
+    class BarrierModel:
+        is_loaded = True
+
+        def __init__(self) -> None:
+            self.entered = False
+
+        def moderate(self, text, *, policy=None, response=None, **kwargs):
+            # Both models must be in-flight at once for the barrier to release.
+            barrier.wait()
+            self.entered = True
+            _time.sleep(0.01)
+            return ModelVerdict(
+                model_id="barrier", verdict=VerdictLabel.SAFE, score=0.0, latency_ms=1.0
+            )
+
+    cascade = Cascade(CascadeConfig(enable_triage=False, concurrent_local=True))
+    cascade._qwen_gen = BarrierModel()
+    cascade._csr = BarrierModel()
+
+    result = cascade.moderate(ModerateRequest(text="x", mode=Mode.STANDARD))
+
+    assert cascade._qwen_gen.entered and cascade._csr.entered
+    assert set(result.model_verdicts) == {"qwen3_guard_gen", "nemotron_csr"}
 
 
 def test_policy_match_without_override_preserves_aggregate_verdict():

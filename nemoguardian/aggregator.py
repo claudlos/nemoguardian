@@ -93,6 +93,22 @@ def aggregate(
             if snippet:
                 reasons.append(f"[{label}] {snippet}")
 
+    if verdicts and weighted_total == 0:
+        # Models WERE run but every vote was errored/dropped (e.g. reasoning
+        # models that truncated before emitting a label). Fail safe-by-design:
+        # escalate to CONTROVERSIAL rather than silently returning "safe" (which
+        # is what an empty weighted mean does). An empty ``verdicts`` dict is a
+        # deliberate caller opt-out (all model toggles off) and is left as-is.
+        reasons.append(
+            "[NemoGuardian] No model produced a usable verdict — escalating to controversial."
+        )
+        return AggregatedVerdict(
+            verdict=VerdictLabel.CONTROVERSIAL,
+            score=0.5,
+            reasons=reasons[:6],
+            categories=[],
+        )
+
     if weighted_total > 0:
         weighted_score = weighted_score / weighted_total
 

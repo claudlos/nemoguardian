@@ -258,8 +258,41 @@ make final-submission-check FINAL_CHECK_FLAGS="--video-url https://<hosted-demo-
 ## Modes
 
 - `fast` — Qwen3Guard-Stream only. Streaming token-level. ~1ms latency.
-- `standard` — Qwen3Guard-Gen + Nemotron-CSR. Reasoning is controlled by `NEMOGUARDIAN_REASONING`.
-- `deep` — Local guard stack + API-backed Nemotron 3 Ultra triage to explain disagreements.
+- `standard` — Qwen3Guard-Gen + Nemotron-CSR (reasoning **off** for low latency). The
+  two local guards run concurrently.
+- `deep` — Local guard stack with Nemotron-CSR reasoning **on**, plus API-backed
+  Nemotron 3 Ultra triage to adjudicate disagreements.
+
+`NEMOGUARDIAN_REASONING=false` forces reasoning off even in deep mode; reasoning is
+never on in standard mode. Set `NEMOGUARDIAN_CONCURRENT_LOCAL=false` to run the
+local guards sequentially, or `NEMOGUARDIAN_ATTN_IMPL=flash_attention_2` to speed
+up the local 4B guards on capable GPUs.
+
+### Fail-safe behaviour
+
+The cascade fails **safe-by-design**, not open: a reasoning model that truncates
+before emitting its verdict is treated as an *unusable* vote (dropped, not counted
+as "safe"), the deep-mode triage **escalates to `controversial`** when its output
+can't be parsed (rather than defaulting to safe), and if every model's vote is
+dropped the aggregate verdict is `controversial`. Untrusted content sent to the
+triage adjudicator is fenced and a system turn forbids the model from obeying
+instructions inside it (prompt-injection hardening).
+
+## Evaluation
+
+Measure accuracy quantitatively against a labeled benchmark
+(`data/benchmark.jsonl`, with PII/scam/toxicity/jailbreak/violence/self-harm/illegal
+attacks plus benign hard-negatives for FPR):
+
+```bash
+make eval                                          # standard mode, table output
+make eval EVAL_FLAGS="--mode deep --json"          # deep mode, JSON report
+python scripts/eval_benchmark.py --flag-on unsafe,controversial
+```
+
+Reports per-category and overall precision / recall / FPR / F1 for the aggregate
+cascade **and** each individual model, plus mean latency. Runs the real models, so
+use a GPU host; the metric logic is unit-tested without a GPU (`tests/test_eval.py`).
 
 nemoguardian runs on **commodity GPUs starting at $0.07/hr**. The same Docker image
 works on every option. See `GET /providers/offers` for live pricing.

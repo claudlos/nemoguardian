@@ -16,11 +16,17 @@ import re
 from typing import Any
 
 from nemoguardian.models.base import ModerationModel
-from nemoguardian.models.torch_runtime import runtime_torch_dtype
+from nemoguardian.models.torch_runtime import attn_impl_kwargs, dtype_kwargs
 from nemoguardian.schemas import VerdictLabel
 
-_PROMPT_HARM_RE = re.compile(r"Prompt harm: (harmful|unharmful)")
-_RESPONSE_HARM_RE = re.compile(r"Response Harm: (harmful|unharmful)")
+# Tolerant of casing/spacing drift in the model's output ("Prompt harm:",
+# "Prompt Harm :", "PROMPT HARM:", etc.). The model card uses inconsistent
+# casing ("Prompt harm" vs "Response Harm"), so don't pin it.
+_PROMPT_HARM_RE = re.compile(r"prompt\s+harm\s*:\s*(harmful|unharmful)", re.IGNORECASE)
+_RESPONSE_HARM_RE = re.compile(r"response\s+harm\s*:\s*(harmful|unharmful)", re.IGNORECASE)
+# Reasoning models wrap chain-of-thought in <think>...</think>; the verdict
+# labels come afterwards.
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
 
 # Verbatim safety prompt template from NVIDIA's model card.
@@ -77,7 +83,7 @@ class NemotronCSR(ModerationModel):
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
-        kwargs: dict[str, Any] = {"torch_dtype": runtime_torch_dtype(torch), "device_map": "auto"}
+        kwargs: dict[str, Any] = {**dtype_kwargs(torch), **attn_impl_kwargs(), "device_map": "auto"}
         if self.load_in_4bit:
             from transformers import BitsAndBytesConfig
 
@@ -89,7 +95,14 @@ class NemotronCSR(ModerationModel):
         self.model = AutoModelForCausalLM.from_pretrained(self.model_name, **kwargs)
         self.model.eval()
 
-    def _build_prompt(self, text: str, policy: str | None, response: str | None) -> str:
+    def _build_prompt(
+        self,
+        text: str,
+        policy: str | None,
+        response: str | None,
+        reasoning: bool | None = None,
+    ) -> str:
+        reasoning = self.reasoning if reasoning is None else reasoning
         if policy:
             # Custom-policy variant: short, free-form policy directive.
             base = (
@@ -102,13 +115,13 @@ class NemotronCSR(ModerationModel):
             )
             if response:
                 base += f"Assistant response: {response}\n"
-            if self.reasoning:
+            if reasoning:
                 base += "\nFirst reason step by step about whether the policy is violated, then give your labels."
             return base
         # Default verbatim template from the model card.
         prompt = SAFETY_PROMPT_REASONING_ON.replace("<USER_PROMPT>", text)
         prompt = prompt.replace("<LLM_RESPONSE>", response or "(no response provided)")
-        if not self.reasoning:
+        if not reasoning:
             # Strip the /think suffix to use reasoning-off mode.
             prompt = prompt.replace("/think", "")
         return prompt
@@ -119,17 +132,22 @@ class NemotronCSR(ModerationModel):
         *,
         policy: str | None = None,
         response: str | None = None,
+        reasoning: bool | None = None,
     ) -> dict[str, Any]:
         import torch
 
-        prompt_text = self._build_prompt(text, policy, response)
+        # Per-call override lets the cascade run reasoning-off for low-latency
+        # standard mode and reasoning-on only for deep mode (the Mode contract),
+        # without loading the model twice.
+        reasoning = self.reasoning if reasoning is None else reasoning
+        prompt_text = self._build_prompt(text, policy, response, reasoning=reasoning)
         messages = [{"role": "user", "content": prompt_text}]
         chat = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         inputs = self.tokenizer([chat], return_tensors="pt").to(self.model.device)
         with torch.no_grad():
             gen = self.model.generate(
                 **inputs,
-                max_new_tokens=512 if self.reasoning else 64,
+                max_new_tokens=512 if reasoning else 64,
                 do_sample=False,
             )
         out_ids = gen[0][len(inputs.input_ids[0]):].tolist()
@@ -138,19 +156,36 @@ class NemotronCSR(ModerationModel):
         prompt_match = _PROMPT_HARM_RE.search(content)
         response_match = _RESPONSE_HARM_RE.search(content)
 
+        # Surfaced reasoning: drop think blocks and everything from the first
+        # label onward.
+        cut = len(content)
+        for match in (prompt_match, response_match):
+            if match is not None:
+                cut = min(cut, match.start())
+        reasoning_text = _THINK_BLOCK_RE.sub("", content[:cut]).strip()
+
+        if prompt_match is None and response_match is None:
+            # Neither harm label is present. This is almost always a reasoning
+            # trace that ran out of tokens before emitting the verdict — NOT a
+            # genuine "unharmful" decision. Flagging it as an error makes the
+            # aggregator drop this vote instead of silently counting it as safe
+            # (which previously let real violations slip through; see the
+            # SSN-scam disagreement case).
+            return {
+                "verdict": VerdictLabel.SAFE,
+                "score": 0.0,
+                "categories": [],
+                "reasoning": (_THINK_BLOCK_RE.sub("", content).strip()[:1024] or None),
+                "error": "unparseable: no harm label in CSR output (likely truncated reasoning)",
+            }
+
         # Pick the worse of (prompt, response) harm.
-        prompt_harmful = prompt_match and prompt_match.group(1) == "harmful"
-        response_harmful = response_match and response_match.group(1) == "harmful"
-        any_harmful = bool(prompt_harmful or response_harmful)
+        prompt_harmful = bool(prompt_match and prompt_match.group(1).lower() == "harmful")
+        response_harmful = bool(response_match and response_match.group(1).lower() == "harmful")
+        any_harmful = prompt_harmful or response_harmful
 
         verdict = VerdictLabel.UNSAFE if any_harmful else VerdictLabel.SAFE
         score = 1.0 if any_harmful else 0.0
-
-        # Strip the labels from the reasoning trace for cleaner output.
-        reasoning_text = content.strip()
-        for tag in ("Prompt harm:", "Response Harm:"):
-            if tag in reasoning_text:
-                reasoning_text = reasoning_text.split(tag)[0].strip()
 
         return {
             "verdict": verdict,

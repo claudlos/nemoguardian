@@ -71,11 +71,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scenario-json", help="Optional JSON file containing scenario turns.")
     parser.add_argument(
         "--config-path",
-        default=os.environ.get("NEMOGUARDIAN_BOT_CONFIG_PATH", "/tmp/nemoguardian_discord_actor_config.json"),
+        # Dedicated actor var wins so sourcing discord-live.env (which sets the
+        # shared NEMOGUARDIAN_BOT_* paths for the live smoke) doesn't silently
+        # redirect the actor scenario's files.
+        default=(
+            os.environ.get("NEMOGUARDIAN_ACTOR_CONFIG_PATH")
+            or os.environ.get("NEMOGUARDIAN_BOT_CONFIG_PATH")
+            or "/tmp/nemoguardian_discord_actor_config.json"
+        ),
     )
     parser.add_argument(
         "--audit-path",
-        default=os.environ.get("NEMOGUARDIAN_BOT_AUDIT_PATH", "/tmp/nemoguardian_discord_actor_audit.jsonl"),
+        default=(
+            os.environ.get("NEMOGUARDIAN_ACTOR_AUDIT_PATH")
+            or os.environ.get("NEMOGUARDIAN_BOT_AUDIT_PATH")
+            or "/tmp/nemoguardian_discord_actor_audit.jsonl"
+        ),
     )
     parser.add_argument(
         "--mode",

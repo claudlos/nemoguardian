@@ -17,7 +17,7 @@ import re
 from typing import Any
 
 from nemoguardian.models.base import ModerationModel
-from nemoguardian.models.torch_runtime import runtime_torch_dtype
+from nemoguardian.models.torch_runtime import attn_impl_kwargs, dtype_kwargs
 from nemoguardian.schemas import VerdictLabel
 
 # Label and category regexes (verbatim from Qwen3Guard model card)
@@ -61,7 +61,7 @@ class Qwen3GuardGen(ModerationModel):
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
-        kwargs: dict[str, Any] = {"torch_dtype": runtime_torch_dtype(torch), "device_map": "auto"}
+        kwargs: dict[str, Any] = {**dtype_kwargs(torch), **attn_impl_kwargs(), "device_map": "auto"}
         if self.load_in_4bit:
             from transformers import BitsAndBytesConfig
 
@@ -145,7 +145,7 @@ class Qwen3GuardStream:
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         self.model = AutoModelForTokenClassification.from_pretrained(
             self.model_name,
-            torch_dtype=runtime_torch_dtype(torch),
+            **dtype_kwargs(torch),
             device_map="auto",
         )
         self.model.eval()

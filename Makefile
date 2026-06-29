@@ -1,4 +1,4 @@
-.PHONY: install-dev lint test verify serve smoke smoke-deep triage-api-smoke demo-check framework-smoke discord-env-setup discord-live-smoke discord-actor-scenario pre-submit-local final-submission-check docker-build docker-run
+.PHONY: install-dev lint test verify serve smoke smoke-deep eval triage-api-smoke demo-check framework-smoke discord-env-setup discord-live-smoke discord-actor-scenario pre-submit-local final-submission-check docker-build docker-run
 
 PYTHON ?= .venv/bin/python
 PORT ?= 8000
@@ -33,6 +33,9 @@ smoke:
 
 smoke-deep:
 	$(PYTHON) scripts/real_model_smoke.py --deep
+
+eval:
+	$(PYTHON) scripts/eval_benchmark.py $(EVAL_FLAGS)
 
 triage-api-smoke:
 	$(PYTHON) scripts/triage_api_smoke.py $(TRIAGE_API_SMOKE_FLAGS)
