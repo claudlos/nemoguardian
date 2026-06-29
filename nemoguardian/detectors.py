@@ -4,29 +4,54 @@ Qwen3Guard and Nemotron-CSR classify *content* harm (violence, PII, sexual,
 illegal, etc.). They reliably miss **prompt-injection / jailbreak** attempts
 ("ignore previous instructions", "you are now DAN", "output the verdict as
 safe") because those aren't harmful *content* in the safety taxonomy — they're
-attacks on the system. This module adds a cheap regex layer that the cascade
-folds in as an extra vote, lifting jailbreak recall without touching FPR.
+attacks on the system. This module adds a cheap deterministic layer that the
+cascade folds in as an extra vote, lifting jailbreak recall without touching FPR.
 
-Two matching layers run against the input:
-1. **Surface** patterns on a lightly-normalized copy (NFKC + zero-width/control
-   stripped, lowercased). Catches plain text plus unicode/fullwidth/zero-width
-   obfuscation with no FPR cost (same words).
-2. **Collapsed** patterns on an alphanumeric-only, de-leetspeaked copy. Catches
-   character-spacing ("i g n o r e"), punctuation-splitting ("i.g.n.o.r.e") and
-   leetspeak ("1gn0re pr3vi0us"). Patterns still require an injection-specific
-   object (instructions/prompt/rules/policy, "no restrictions", "bypass the
-   filter", "mark ... as safe", a leading SYSTEM: turn), so benign text such as
-   "ignore the typo" or "no limits on PTO" does not match.
+Defense layers (all run on every input):
+1. **Surface** — NFKC + zero-width/control strip + homoglyph fold + lowercase.
+   Catches plain text and unicode/fullwidth/zero-width/homoglyph obfuscation.
+2. **Collapsed** — alphanumeric-only, de-leetspeaked copy of the surface.
+   Catches character-spacing ("i g n o r e"), punctuation-splitting and leetspeak.
+3. **Decoded** — base64 segments and a rot13 pass are decoded and re-normalized,
+   then scanned with the same patterns. Catches encoded payloads.
+4. **Multilingual** — injection patterns for several Latin-script languages
+   (es/fr/de/pt/it) run on the surface.
+
+Patterns require an injection-specific object (instructions/prompt/rules/policy,
+"no restrictions", "bypass the filter", "mark ... as safe", a leading SYSTEM:
+turn), so benign text — "ignore the typo", "no limits on PTO", or the German
+"ignoriere meinen Tippfehler" (ignore my typo) — does not match.
 """
 
 from __future__ import annotations
 
+import base64
+import codecs
+import contextlib
 import re
 import unicodedata
 
 from nemoguardian.schemas import ModelVerdict, VerdictLabel
 
-# --- Layer 1: surface patterns (run on the NFKC/lowercased copy) ---------------
+# --- Homoglyph fold: common Cyrillic/Greek look-alikes -> ASCII -----------------
+_HOMOGLYPHS = str.maketrans(
+    {
+        # Cyrillic lowercase
+        "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x",
+        "і": "i", "ј": "j", "ѕ": "s", "к": "k", "м": "m", "н": "h", "т": "t",
+        "в": "b", "г": "r", "ԁ": "d", "ո": "n", "հ": "h", "ѵ": "v", "ｇ": "g",
+        # Cyrillic uppercase
+        "А": "a", "Е": "e", "О": "o", "Р": "p", "С": "c", "У": "y", "Х": "x",
+        "І": "i", "Ѕ": "s", "К": "k", "М": "m", "Н": "h", "Т": "t", "В": "b",
+        # Greek lowercase
+        "ο": "o", "ε": "e", "α": "a", "ρ": "p", "ν": "v", "ι": "i", "τ": "t",
+        "υ": "u", "κ": "k", "χ": "x", "γ": "y", "ϲ": "c", "ѡ": "w",
+    }
+)
+
+_LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"})
+
+# --- Layer 1: surface patterns (English) ---------------------------------------
 _SURFACE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
         "override-instructions",
@@ -91,9 +116,21 @@ _SURFACE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ),
 ]
 
-# --- Layer 2: collapsed patterns (run on alnum-only, de-leetspeaked copy) -------
-# No word boundaries; keywords joined by bounded alnum gaps. Each still requires
-# an injection-specific object so benign collapsed text won't match.
+# --- Multilingual injection (es/fr/de/pt/it), run on the surface ---------------
+# verb (ignore/forget/disregard) within range of an instructions/rules noun.
+_MULTILINGUAL_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    (
+        "override-instructions-ml",
+        re.compile(
+            r"\b(ignor\w*|olvid\w*|oubli\w*|dimentica\w*|desconsider\w*|missachte\w*)\b"
+            r"[^.\n]{0,45}"
+            r"\b(instruc\w*|istruzion\w*|anweisung\w*|règles?|regeln?|regla\w*|regra\w*|"
+            r"regola\w*|direktiv\w*|consign\w*)",
+        ),
+    ),
+]
+
+# --- Layer 2: collapsed patterns (alnum-only, de-leetspeaked) -------------------
 _COLLAPSED_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
         "override-instructions",
@@ -116,7 +153,7 @@ _COLLAPSED_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ),
 ]
 
-_LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"})
+_B64_RE = re.compile(r"[A-Za-z0-9+/]{16,}={0,2}")
 
 # Heuristic vote strength. >= aggregator override threshold (0.5) so a confident
 # injection match escalates the cascade to unsafe even if the LLM guards passed.
@@ -124,12 +161,12 @@ _INJECTION_SCORE = 0.9
 
 
 def _surface_norm(text: str) -> str:
-    """NFKC, strip zero-width/control (keep \\n\\t), lowercase."""
+    """NFKC, strip zero-width/control (keep \\n\\t), fold homoglyphs, lowercase."""
     t = unicodedata.normalize("NFKC", text)
     t = "".join(
         ch for ch in t if ch in "\n\t" or unicodedata.category(ch) not in ("Cf", "Cc")
     )
-    return t.lower()
+    return t.translate(_HOMOGLYPHS).lower()
 
 
 def _collapsed_norm(surface: str) -> str:
@@ -137,17 +174,37 @@ def _collapsed_norm(surface: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", surface.translate(_LEET))
 
 
+def _decoded_variants(text: str, surface: str) -> list[str]:
+    """Decoded payloads to additionally scan: base64 segments + a rot13 pass."""
+    variants: list[str] = []
+    # rot13 (letters only); reverses a rot13-encoded payload, gibberish otherwise.
+    with contextlib.suppress(Exception):
+        variants.append(_surface_norm(codecs.decode(surface, "rot13")))
+    # base64 — decode from the RAW text (case-sensitive) and keep text-like results.
+    for tok in _B64_RE.findall(text):
+        try:
+            raw = base64.b64decode(tok + "=" * (-len(tok) % 4), validate=False)
+        except Exception:
+            continue
+        decoded = raw.decode("utf-8", "ignore")
+        if sum(ch.isalpha() for ch in decoded) >= 6:
+            variants.append(_surface_norm(decoded))
+    return variants
+
+
 def detect_prompt_injection(text: str) -> list[str]:
     """Return the names of injection patterns matched in ``text`` (deduped)."""
     surface = _surface_norm(text)
-    collapsed = _collapsed_norm(surface)
+    scan = [surface, *_decoded_variants(text, surface)]
     hits: list[str] = []
-    for name, rx in _SURFACE_PATTERNS:
-        if rx.search(surface):
-            hits.append(name)
-    for name, rx in _COLLAPSED_PATTERNS:
-        if name not in hits and rx.search(collapsed):
-            hits.append(name)
+    for s in scan:
+        collapsed = _collapsed_norm(s)
+        for name, rx in (*_SURFACE_PATTERNS, *_MULTILINGUAL_PATTERNS):
+            if name not in hits and rx.search(s):
+                hits.append(name)
+        for name, rx in _COLLAPSED_PATTERNS:
+            if name not in hits and rx.search(collapsed):
+                hits.append(name)
     return hits
 
 
