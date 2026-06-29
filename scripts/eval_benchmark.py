@@ -49,16 +49,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument("--limit", type=int, default=0, help="Evaluate only the first N cases.")
     p.add_argument("--json", action="store_true", help="Emit a JSON report instead of a table.")
+    p.add_argument(
+        "--dump-predictions",
+        metavar="PATH",
+        help="Write per-case per-model verdicts+scores to JSONL for offline "
+        "aggregator-threshold sweeps (see scripts/sweep_thresholds.py).",
+    )
     return p.parse_args(argv)
 
 
 def build_cascade_predict(mode: str):
-    """Return ``(predict, per_model_collector)`` backed by the real cascade."""
+    """Return ``(predict, per_model_collector, dump_records)`` backed by the cascade."""
     from nemoguardian.cascade import Cascade, CascadeConfig
     from nemoguardian.schemas import Mode, ModerateRequest
 
     cascade = Cascade(CascadeConfig.from_env())
     per_model_verdicts: dict[str, list[tuple[bool, str, str]]] = {}
+    dump_records: list[dict] = []
 
     def predict(case: EvalCase) -> PredictResult:
         start = time.perf_counter()
@@ -67,8 +74,20 @@ def build_cascade_predict(mode: str):
                 ModerateRequest(text=case.text, policy=case.policy, mode=Mode(mode))
             )
         except Exception as exc:  # never let one bad case abort the sweep
+            dump_records.append(
+                {"id": case.id, "category": case.category, "gold": case.label,
+                 "aggregate": "controversial", "error": str(exc), "models": {}}
+            )
             return PredictResult(verdict="controversial", latency_ms=0.0, error=str(exc))
         latency = (time.perf_counter() - start) * 1000.0
+        models = {
+            key: {"verdict": mv.verdict.value, "score": mv.score, "error": mv.error}
+            for key, mv in resp.model_verdicts.items()
+        }
+        dump_records.append(
+            {"id": case.id, "category": case.category, "gold": case.label,
+             "aggregate": resp.verdict.value, "models": models}
+        )
         for key, mv in resp.model_verdicts.items():
             if mv.error:
                 continue
@@ -77,7 +96,7 @@ def build_cascade_predict(mode: str):
             )
         return PredictResult(verdict=resp.verdict.value, latency_ms=latency)
 
-    return predict, per_model_verdicts
+    return predict, per_model_verdicts, dump_records
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -87,8 +106,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.limit:
         cases = cases[: args.limit]
 
-    predict, per_model_verdicts = build_cascade_predict(args.mode)
+    predict, per_model_verdicts, dump_records = build_cascade_predict(args.mode)
     report, predictions = run_eval(cases, predict, flag_on=flag_on)
+
+    if args.dump_predictions:
+        with open(args.dump_predictions, "w", encoding="utf-8") as fh:
+            for rec in dump_records:
+                fh.write(json.dumps(rec) + "\n")
 
     # Per-model reports (scored only where the model produced a usable verdict).
     per_model_reports = {}
