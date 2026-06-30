@@ -1724,7 +1724,12 @@ async def test_webhook_adapter_sends_env_api_key(monkeypatch):
     assert verdict["verdict"] == "unsafe"
     assert client.posts[0]["headers"] == {"Authorization": "Bearer nmg_env_key"}
     assert client.posts[0]["params"] == {"policy_preset": "discord"}
-    assert client.posts[1]["json"] == {"text": "drop your SSN", "verdict": verdict}
+    # Default mode is verdict_only: the raw text must never be forwarded.
+    forwarded = client.posts[1]["json"]
+    assert forwarded["verdict"] == verdict
+    assert forwarded["forward_text"] == "verdict_only"
+    assert "text" not in forwarded
+    assert forwarded["text_sha256"] == webhook.text_hash("drop your SSN")
 
 
 async def test_webhook_adapter_uses_default_http_clients_and_explicit_api_key(monkeypatch):
@@ -1773,10 +1778,104 @@ async def test_webhook_adapter_uses_default_http_clients_and_explicit_api_key(mo
     assert clients[1].posts == [
         {
             "url": "http://forward.test/hook",
-            "json": {"text": "hello", "verdict": verdict},
+            "json": {
+                "verdict": verdict,
+                "forward_text": "verdict_only",
+                "text_sha256": webhook.text_hash("hello"),
+            },
         }
     ]
     assert webhook._auth_headers("   ") == {}
+
+
+_PII_TEXT = "Reach me at jane.doe@example.com or SSN 123-45-6789 now."
+
+
+async def test_webhook_verdict_only_never_forwards_raw_text(monkeypatch):
+    monkeypatch.delenv("NEMOGUARDIAN_WEBHOOK_FORWARD_TEXT", raising=False)
+    client = FakeHTTPClient()
+
+    await webhook.moderate_and_forward(
+        _PII_TEXT,
+        forward_url="http://forward.test/hook",
+        moderator_url="http://moderator.test",
+        client=client,
+    )
+
+    forwarded = client.posts[1]["json"]
+    assert forwarded["forward_text"] == "verdict_only"
+    assert "text" not in forwarded
+    # Neither the raw PII nor any redacted echo of the content is present.
+    assert "jane.doe@example.com" not in str(forwarded)
+    assert "123-45-6789" not in str(forwarded)
+    assert forwarded["text_sha256"] == webhook.text_hash(_PII_TEXT)
+
+
+async def test_webhook_redacted_strips_pii(monkeypatch):
+    monkeypatch.delenv("NEMOGUARDIAN_WEBHOOK_FORWARD_TEXT", raising=False)
+    client = FakeHTTPClient()
+
+    await webhook.moderate_and_forward(
+        _PII_TEXT,
+        forward_url="http://forward.test/hook",
+        moderator_url="http://moderator.test",
+        forward_text="redacted",
+        client=client,
+    )
+
+    forwarded = client.posts[1]["json"]
+    assert forwarded["forward_text"] == "redacted"
+    assert "text" in forwarded
+    assert "jane.doe@example.com" not in forwarded["text"]
+    assert "123-45-6789" not in forwarded["text"]
+    assert "[email]" in forwarded["text"]
+    assert "[ssn]" in forwarded["text"]
+
+
+async def test_webhook_full_forwards_text_only_when_explicit(monkeypatch):
+    monkeypatch.delenv("NEMOGUARDIAN_WEBHOOK_FORWARD_TEXT", raising=False)
+    client = FakeHTTPClient()
+
+    await webhook.moderate_and_forward(
+        _PII_TEXT,
+        forward_url="http://forward.test/hook",
+        moderator_url="http://moderator.test",
+        forward_text="full",
+        client=client,
+    )
+
+    forwarded = client.posts[1]["json"]
+    assert forwarded["forward_text"] == "full"
+    assert forwarded["text"] == _PII_TEXT
+
+
+async def test_webhook_full_requires_explicit_opt_in(monkeypatch):
+    """Without an explicit full/redacted request the raw text stays on-box."""
+    monkeypatch.delenv("NEMOGUARDIAN_WEBHOOK_FORWARD_TEXT", raising=False)
+    client = FakeHTTPClient()
+
+    await webhook.moderate_and_forward(
+        _PII_TEXT,
+        forward_url="http://forward.test/hook",
+        moderator_url="http://moderator.test",
+        client=client,
+    )
+
+    assert client.posts[1]["json"].get("forward_text") == "verdict_only"
+    assert "text" not in client.posts[1]["json"]
+
+
+def test_webhook_resolve_forward_mode_env_and_fallback(monkeypatch):
+    monkeypatch.setenv("NEMOGUARDIAN_WEBHOOK_FORWARD_TEXT", "full")
+    # Explicit argument wins over the environment variable.
+    assert webhook.resolve_forward_mode("redacted") == "redacted"
+    # Env var is used when no explicit argument is supplied.
+    assert webhook.resolve_forward_mode(None) == "full"
+    # Unknown values degrade to the safe default (fail-safe).
+    monkeypatch.setenv("NEMOGUARDIAN_WEBHOOK_FORWARD_TEXT", "leak-everything")
+    assert webhook.resolve_forward_mode(None) == "verdict_only"
+    monkeypatch.delenv("NEMOGUARDIAN_WEBHOOK_FORWARD_TEXT", raising=False)
+    assert webhook.resolve_forward_mode(None) == "verdict_only"
 
 
 def test_config_store_round_trips_platform_defaults(tmp_path):
