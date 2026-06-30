@@ -12,10 +12,18 @@ and nemotron_csr.py. All models must:
 from __future__ import annotations
 
 import abc
+import threading
 import time
 from typing import Any
 
 from nemoguardian.schemas import ModelVerdict, VerdictLabel
+
+# Process-wide lock serializing first-time model loads. The cascade loads the
+# local guards concurrently, and a transformers _LazyModule does NOT tolerate
+# two threads doing their first `from transformers import ...` at once (raises
+# "cannot import name 'AutoModelForCausalLM'"). Serializing only the load keeps
+# inference fully concurrent — after warmup the fast path skips the lock.
+_LOAD_LOCK = threading.Lock()
 
 
 class ModerationModel(abc.ABC):
@@ -32,8 +40,10 @@ class ModerationModel(abc.ABC):
 
     def ensure_loaded(self) -> None:
         if not self._loaded:
-            self._load()
-            self._loaded = True
+            with _LOAD_LOCK:
+                if not self._loaded:  # double-checked: only the first thread loads
+                    self._load()
+                    self._loaded = True
 
     @abc.abstractmethod
     def _load(self) -> None:
@@ -55,16 +65,25 @@ class ModerationModel(abc.ABC):
         *,
         policy: str | None = None,
         response: str | None = None,
+        **kwargs: Any,
     ) -> ModelVerdict:
-        """Public entry point. Times the call and surfaces errors."""
+        """Public entry point. Times the call and surfaces errors.
+
+        Extra keyword args are forwarded to ``_moderate_impl`` so a specific
+        model can accept per-call options (e.g. Nemotron-CSR's ``reasoning``).
+        """
         try:
             self.ensure_loaded()
             start = time.perf_counter()
-            payload = self._moderate_impl(text, policy=policy, response=response)
+            payload = self._moderate_impl(text, policy=policy, response=response, **kwargs)
             latency_ms = (time.perf_counter() - start) * 1000.0
             verdict = payload.get("verdict", VerdictLabel.SAFE)
             if isinstance(verdict, str):
                 verdict = VerdictLabel(verdict.lower())
+            # An impl may flag its own output as unusable (e.g. a reasoning model
+            # that ran out of tokens before emitting a label). Surface it via
+            # ``error`` so the aggregator DROPS this vote instead of counting a
+            # silent "safe" — see aggregator fail-safe handling.
             return ModelVerdict(
                 model_id=self.model_id,
                 verdict=verdict,
@@ -72,7 +91,7 @@ class ModerationModel(abc.ABC):
                 categories=list(payload.get("categories", [])),
                 reasoning=payload.get("reasoning"),
                 latency_ms=latency_ms,
-                error=None,
+                error=payload.get("error"),
             )
         except Exception as exc:
             return ModelVerdict(

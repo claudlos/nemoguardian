@@ -94,6 +94,26 @@ def test_aggregate_categories_dedup():
     assert out.categories.count("Violent") == 1
 
 
+def test_aggregate_escalates_when_all_votes_dropped():
+    # Both models errored/dropped → no usable verdict. Must NOT return safe.
+    out = aggregate(
+        {
+            "qwen3_guard_gen": _mv("q", "safe", 0.0, error="boom"),
+            "nemotron_csr": _mv("c", "safe", 0.0, error="unparseable: no harm label"),
+        }
+    )
+    assert out.verdict == VerdictLabel.CONTROVERSIAL
+    assert out.score == 0.5
+    assert any("No model produced a usable verdict" in r for r in out.reasons)
+
+
+def test_aggregate_empty_is_safe_passthrough():
+    # Empty dict = deliberate caller opt-out (all model toggles off), not a
+    # failure — leave as safe pass-through.
+    out = aggregate({})
+    assert out.verdict == VerdictLabel.SAFE
+
+
 def test_aggregate_with_triage_deep_mode():
     out = aggregate(
         {

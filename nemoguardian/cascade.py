@@ -12,9 +12,12 @@ import os
 import re
 import time
 import uuid
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 from nemoguardian.aggregator import AggregatedVerdict, aggregate
+from nemoguardian.detectors import heuristic_verdict
 from nemoguardian.models.nemotron_csr import NemotronCSR
 from nemoguardian.models.nemotron_triage import NemotronTriage
 from nemoguardian.models.qwen3_guard import Qwen3GuardGen, Qwen3GuardStream
@@ -42,8 +45,19 @@ class CascadeConfig:
     triage_base_url: str | None = None
     qwen_gen_4bit: bool = True
     csr_4bit: bool = True
-    reasoning: bool = True  # Nemotron-CSR reasoning-on mode
+    reasoning: bool = True  # Nemotron-CSR reasoning-on default (deep mode)
     enable_triage: bool = True
+    concurrent_local: bool = True  # run the local guards (Qwen+CSR) in parallel
+    # Deep mode only pays for the 550B triage call when the two local guards
+    # actually disagree. Adjudicating a unanimous verdict adds the (potentially
+    # multi-second) API round-trip without changing the outcome — and contradicts
+    # NemotronTriage.adjudicate's own contract ("only runs when the guards
+    # already disagree"). Set False to force triage on every deep request.
+    triage_on_disagreement_only: bool = True
+    # Same-label score gap wide enough to still count as a disagreement worth
+    # adjudicating (e.g. both "unsafe" but 0.99 vs 0.40). Differing labels always
+    # trigger triage regardless of this band.
+    triage_score_band: float = 0.5
 
     @classmethod
     def from_env(cls) -> CascadeConfig:
@@ -61,6 +75,11 @@ class CascadeConfig:
             csr_4bit=_env_bool("NEMOGUARDIAN_CSR_4BIT", quantize),
             reasoning=_env_bool("NEMOGUARDIAN_REASONING", True),
             enable_triage=_env_bool("NEMOGUARDIAN_ENABLE_TRIAGE", True),
+            concurrent_local=_env_bool("NEMOGUARDIAN_CONCURRENT_LOCAL", True),
+            triage_on_disagreement_only=_env_bool(
+                "NEMOGUARDIAN_TRIAGE_ON_DISAGREEMENT", True
+            ),
+            triage_score_band=_env_float("NEMOGUARDIAN_TRIAGE_SCORE_BAND", 0.5),
         )
 
 
@@ -128,6 +147,7 @@ class Cascade:
             "csr_4bit": self.config.csr_4bit,
             "reasoning": self.config.reasoning,
             "enable_triage": self.config.enable_triage,
+            "triage_on_disagreement_only": self.config.triage_on_disagreement_only,
         }
 
     def triage_status(self) -> dict[str, str | bool | None]:
@@ -159,27 +179,61 @@ class Cascade:
         if request.mode == Mode.FAST:
             if request.use_qwen_stream:
                 model_verdicts["qwen3_guard_stream"] = self._stream_document_verdict(request.text)
-        elif request.use_qwen_gen:
-            model_verdicts["qwen3_guard_gen"] = self.qwen_gen.moderate(request.text, policy=request.policy)
+        else:
+            # Standard/deep: run the local guards (independent of each other) and
+            # gather them. Reasoning-on CSR is reserved for deep mode — standard
+            # uses the fast reasoning-off path (matches the Mode contract).
+            tasks: dict[str, Callable[[], ModelVerdict]] = {}
+            if request.use_qwen_gen:
+                tasks["qwen3_guard_gen"] = lambda: self.qwen_gen.moderate(
+                    request.text, policy=request.policy
+                )
+            if request.use_nemotron_csr:
+                csr_reasoning = request.mode == Mode.DEEP and self.config.reasoning
+                tasks["nemotron_csr"] = lambda: self.csr.moderate(
+                    request.text, policy=request.policy, reasoning=csr_reasoning
+                )
+            model_verdicts.update(self._run_local_verdicts(tasks))
 
-        if request.mode != Mode.FAST and request.use_nemotron_csr:
-            model_verdicts["nemotron_csr"] = self.csr.moderate(request.text, policy=request.policy)
-
-        # Triage only in DEEP mode, only when both Qwen and CSR ran.
+        # Triage only in DEEP mode, only when both Qwen and CSR ran, and — by
+        # default — only when the two local guards actually DISAGREE. Unanimous
+        # verdicts skip the 550B adjudicator: it costs an API round-trip without
+        # changing the outcome. The escalating prompt-injection detector below
+        # still runs in every mode, so this never weakens the safety floor.
+        triage_skipped = False
         if (
             request.mode == Mode.DEEP
             and self.triage is not None
             and "qwen3_guard_gen" in model_verdicts
             and "nemotron_csr" in model_verdicts
         ):
-            model_verdicts["triage"] = self.triage.adjudicate(
-                text=request.text,
-                policy=request.policy,
-                qwen_verdict=model_verdicts["qwen3_guard_gen"],
-                csr_verdict=model_verdicts["nemotron_csr"],
-            )
+            qwen_v = model_verdicts["qwen3_guard_gen"]
+            csr_v = model_verdicts["nemotron_csr"]
+            if not self.config.triage_on_disagreement_only or _guards_disagree(
+                qwen_v, csr_v, self.config.triage_score_band
+            ):
+                model_verdicts["triage"] = self.triage.adjudicate(
+                    text=request.text,
+                    policy=request.policy,
+                    qwen_verdict=qwen_v,
+                    csr_verdict=csr_v,
+                )
+            else:
+                triage_skipped = True
+
+        # Deterministic prompt-injection / jailbreak detector — cheap, runs in
+        # every mode. The content guards (Qwen3Guard, Nemotron-CSR) don't treat
+        # injection as harmful content, so this folds in an escalating vote.
+        injection = heuristic_verdict(request.text)
+        if injection is not None:
+            model_verdicts["prompt_injection"] = injection
 
         aggregated: AggregatedVerdict = aggregate(model_verdicts)
+        if triage_skipped:
+            aggregated.reasons.append(
+                "[cascade] Local guards agreed — 550B triage skipped "
+                "(deep mode adjudicates only on disagreement)."
+            )
         for category in _text_policy_categories(request.text):
             if category not in aggregated.categories:
                 aggregated.categories.append(category)
@@ -216,6 +270,24 @@ class Cascade:
             timestamp=dt.datetime.now(dt.timezone.utc).isoformat(),
         )
 
+    def _run_local_verdicts(
+        self, tasks: dict[str, Callable[[], ModelVerdict]]
+    ) -> dict[str, ModelVerdict]:
+        """Run the local guard callables, concurrently when configured.
+
+        ``moderate`` calls (via ``base.ModerationModel.moderate``) never raise —
+        they surface failures through the verdict's ``error`` field — so results
+        are gathered without per-future error handling. Output order is canonical
+        (task insertion order), independent of completion order.
+        """
+        if not tasks:
+            return {}
+        if not self.config.concurrent_local or len(tasks) == 1:
+            return {key: fn() for key, fn in tasks.items()}
+        with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
+            futures = {key: pool.submit(fn) for key, fn in tasks.items()}
+            return {key: fut.result() for key, fut in futures.items()}
+
     def stream_token_verdicts(self, text: str):
         """Per-token verdicts from Qwen3Guard-Stream."""
         yield from self.qwen_stream.stream_classify(text)
@@ -247,6 +319,21 @@ class Cascade:
         )
 
 
+def _guards_disagree(a: ModelVerdict, b: ModelVerdict, band: float) -> bool:
+    """True when the two local guards meaningfully disagree.
+
+    A clean disagreement is a different verdict *label*, or the same label with a
+    score gap at least ``band`` wide (real uncertainty). If either guard errored
+    it is not a clean two-guard split — the aggregator already handles dropped
+    votes — so we don't pay for adjudication.
+    """
+    if a.error or b.error:
+        return False
+    if a.verdict != b.verdict:
+        return True
+    return abs((a.score or 0.0) - (b.score or 0.0)) >= band
+
+
 def _text_policy_categories(text: str) -> list[str]:
     if _SSN_RE.search(text) or _EMAIL_RE.search(text) or _PHONE_RE.search(text) or _PAYMENT_CARD_RE.search(text):
         return ["PII"]
@@ -263,6 +350,16 @@ def _env_bool(name: str, default: bool) -> bool:
     if normalized in {"0", "false", "no", "off"}:
         return False
     return default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw.strip())
+    except (TypeError, ValueError):
+        return default
 
 
 def _default_triage_base_url() -> str:

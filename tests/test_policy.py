@@ -163,7 +163,7 @@ def test_cascade_passes_policy_text_to_policy_gate():
             self.verdict = verdict
             self.score = score
 
-        def moderate(self, text: str, *, policy: str | None = None):
+        def moderate(self, text: str, *, policy: str | None = None, **kwargs):
             return ModelVerdict(
                 model_id="static",
                 verdict=self.verdict,
