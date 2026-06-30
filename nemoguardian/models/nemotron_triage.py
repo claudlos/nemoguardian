@@ -114,6 +114,12 @@ class NemotronTriage:
     DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
     OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
     DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b"
+    # Hard cap so a cold/hung provider (e.g. the free OpenRouter route, which
+    # cold-started at ~30s in the recorded run) can't block a moderation call for
+    # the OpenAI SDK's ~10-minute default. On timeout the call raises -> adjudicate()
+    # records it as a transport error -> the aggregator drops the vote (fail-safe,
+    # never fail-open). Override with NEMOGUARDIAN_TRIAGE_TIMEOUT_S.
+    DEFAULT_TIMEOUT_S = 20.0
 
     def __init__(
         self,
@@ -121,6 +127,7 @@ class NemotronTriage:
         api_key: str | None = None,
         base_url: str | None = None,
         model_name: str | None = None,
+        timeout: float | None = None,
     ) -> None:
         import os
 
@@ -132,13 +139,24 @@ class NemotronTriage:
             or self._default_base_url()
         )
         self.model_name = model_name or os.environ.get("NEMOGUARDIAN_TRIAGE_MODEL", self.DEFAULT_MODEL)
+        if timeout is not None:
+            self.timeout = timeout
+        else:
+            try:
+                self.timeout = float(
+                    os.environ.get("NEMOGUARDIAN_TRIAGE_TIMEOUT_S", self.DEFAULT_TIMEOUT_S)
+                )
+            except (TypeError, ValueError):
+                self.timeout = self.DEFAULT_TIMEOUT_S
         if not self.api_key:
             # The triage step is optional — server can run without it.
             self._client = None
         else:
             from openai import OpenAI
 
-            self._client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+            self._client = OpenAI(
+                api_key=self.api_key, base_url=self.base_url, timeout=self.timeout
+            )
 
     @staticmethod
     def _default_base_url() -> str:

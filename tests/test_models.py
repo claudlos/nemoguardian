@@ -449,9 +449,10 @@ def _install_fake_openai(
     class FakeOpenAI:
         created: ClassVar[list[FakeOpenAI]] = []
 
-        def __init__(self, *, api_key: str, base_url: str) -> None:
+        def __init__(self, *, api_key: str, base_url: str, timeout: float | None = None) -> None:
             self.api_key = api_key
             self.base_url = base_url
+            self.timeout = timeout
             self.requests: list[dict[str, Any]] = []
             self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
             self.created.append(self)
@@ -538,6 +539,8 @@ def test_nemotron_triage_parses_fenced_json_and_invalid_verdict(monkeypatch):
 
     assert fake_openai.created[0].api_key == "nvidia-key"
     assert fake_openai.created[0].base_url == "https://nim.test/v1"
+    # The client carries a hard timeout so a hung provider can't block forever.
+    assert fake_openai.created[0].timeout == NemotronTriage.DEFAULT_TIMEOUT_S
     # An invalid verdict label must ESCALATE (fail-safe), never silently → safe.
     assert verdict.verdict == VerdictLabel.CONTROVERSIAL
     assert verdict.score == 0.5
@@ -567,6 +570,17 @@ def test_nemotron_triage_escalates_when_reasoning_truncates_before_json(monkeypa
     assert verdict.score == 0.5
     assert "unparseable" in (verdict.reasoning or "")
     assert verdict.error is None
+
+
+def test_nemotron_triage_timeout_is_env_overridable(monkeypatch):
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvidia-key")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("NEMOGUARDIAN_TRIAGE_TIMEOUT_S", "5")
+    fake_openai = _install_fake_openai(monkeypatch)
+
+    NemotronTriage(model_name="triage-model")
+
+    assert fake_openai.created[0].timeout == 5.0
 
 
 def test_nemotron_triage_extracts_last_json_after_reasoning(monkeypatch):

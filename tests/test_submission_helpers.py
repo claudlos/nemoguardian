@@ -576,9 +576,10 @@ def test_triage_api_smoke_calls_openrouter(monkeypatch):
             )
 
     class FakeOpenAI:
-        def __init__(self, *, api_key, base_url):
+        def __init__(self, *, api_key, base_url, timeout=None):
             self.api_key = api_key
             self.base_url = base_url
+            self.timeout = timeout
             self.chat = SimpleNamespace(completions=FakeCompletions())
 
     monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))

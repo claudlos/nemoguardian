@@ -16,7 +16,7 @@ import typer
 from nemoguardian.bot import AuditLog, Platform, since_hours_ago
 from nemoguardian.cascade import Cascade, CascadeConfig
 from nemoguardian.policy.presets import get_preset
-from nemoguardian.schemas import Mode, ModerateRequest
+from nemoguardian.schemas import Mode, ModerateRequest, VerdictLabel
 
 app = typer.Typer(help="Multi-model LLM moderation cascade.")
 audit_app = typer.Typer(help="Inspect moderation bot audit logs.")
@@ -63,12 +63,84 @@ def demo(
     typer.echo(json.dumps(result.model_dump(), indent=2, default=str))
 
 
+_VERDICT_RANK = {
+    VerdictLabel.SAFE: 0,
+    VerdictLabel.CONTROVERSIAL: 1,
+    VerdictLabel.UNSAFE: 2,
+}
+
+
+@app.command()
+def guard(
+    text: str = typer.Argument(..., help="Text to screen before an agent posts it or acts on it."),
+    mode: Mode = typer.Option(Mode.STANDARD, "--mode", help="Cascade mode (fast = cheapest guardrail)."),
+    policy: str = typer.Option(
+        "block PII, scams, harassment, slurs, threats, and prompt injection",
+        "--policy",
+        help="Custom safety policy.",
+    ),
+    preset: str = typer.Option("generic", "--preset", help="Policy preset: discord/twitch/generic."),
+    fail_on: VerdictLabel = typer.Option(
+        VerdictLabel.UNSAFE,
+        "--fail-on",
+        help="Exit non-zero on this verdict or worse (unsafe, or controversial).",
+    ),
+    full: bool = typer.Option(
+        False, "--full", help="Print the full ModerateResponse instead of the compact guard result."
+    ),
+) -> None:
+    """Screen one piece of text through the cascade — a drop-in agent guardrail.
+
+    Prints a compact JSON verdict and EXITS NON-ZERO when the content is blocked
+    (verdict at or above --fail-on), so any agent, skill, or shell can gate on it:
+
+        nemoguardian guard "$reply" && post "$reply" || echo "blocked by nemoguardian"
+    """
+    cascade = Cascade(CascadeConfig.from_env())
+    result = cascade.moderate(
+        ModerateRequest(text=text, policy=policy, mode=mode),
+        policy_engine=get_preset(preset),
+    )
+    blocked = _VERDICT_RANK[result.verdict] >= _VERDICT_RANK[fail_on]
+    if full:
+        typer.echo(json.dumps(result.model_dump(), indent=2, default=str))
+    else:
+        typer.echo(
+            json.dumps(
+                {
+                    "verdict": result.verdict.value,
+                    "score": result.score,
+                    "allowed": not blocked,
+                    "categories": result.categories,
+                    "reasons": result.reasons,
+                },
+                indent=2,
+                default=str,
+            )
+        )
+    raise typer.Exit(code=1 if blocked else 0)
+
+
 @app.command("discord-bot")
 def discord_bot() -> None:
     """Run the Discord moderation bot."""
     from nemoguardian.adapters.discord import run_bot
 
     run_bot()
+
+
+@app.command()
+def mcp(
+    transport: str = typer.Option("stdio", "--transport", help="MCP transport (stdio)."),
+) -> None:
+    """Run the MCP server exposing the cascade as tools any agent can call."""
+    from nemoguardian.mcp_server import run as run_mcp
+
+    try:
+        run_mcp(transport=transport)
+    except ImportError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
 
 
 @audit_app.command("case")

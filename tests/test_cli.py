@@ -143,6 +143,61 @@ def test_cli_demo_runs_cascade_with_policy_preset(monkeypatch):
     assert captured["policy_engine"] == "preset:discord"
 
 
+def _patch_guard_cascade(monkeypatch, verdict, *, score=0.9):
+    captured = {}
+
+    class FakeCascade:
+        def __init__(self, config):
+            captured["config"] = config
+
+        def moderate(self, request, *, policy_engine=None):
+            captured["request"] = request
+            captured["policy_engine"] = policy_engine
+            return SimpleNamespace(
+                verdict=verdict,
+                score=score,
+                categories=["PII"],
+                reasons=["matched"],
+                model_dump=lambda: {"verdict": verdict.value, "score": score},
+            )
+
+    monkeypatch.setattr(cli_module.CascadeConfig, "from_env", staticmethod(lambda: "fake-config"))
+    monkeypatch.setattr(cli_module, "Cascade", FakeCascade)
+    monkeypatch.setattr(cli_module, "get_preset", lambda preset: f"preset:{preset}")
+    return captured
+
+
+def test_cli_guard_blocks_unsafe_with_nonzero_exit(monkeypatch):
+    captured = _patch_guard_cascade(monkeypatch, VerdictLabel.UNSAFE)
+
+    result = _run("guard", "drop your SSN for $100", "--mode", "standard")
+
+    assert result.exit_code == 1  # blocked → agent/shell can gate on it
+    body = json.loads(result.stdout)
+    assert body["verdict"] == "unsafe"
+    assert body["allowed"] is False
+    assert captured["request"].text == "drop your SSN for $100"
+    assert captured["policy_engine"] == "preset:generic"
+
+
+def test_cli_guard_allows_safe_with_zero_exit(monkeypatch):
+    _patch_guard_cascade(monkeypatch, VerdictLabel.SAFE, score=0.02)
+
+    result = _run("guard", "what time is standup?")
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["allowed"] is True
+
+
+def test_cli_guard_fail_on_controversial_blocks_controversial(monkeypatch):
+    _patch_guard_cascade(monkeypatch, VerdictLabel.CONTROVERSIAL, score=0.5)
+
+    result = _run("guard", "borderline take", "--fail-on", "controversial")
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["allowed"] is False
+
+
 def test_cli_discord_bot_invokes_adapter(monkeypatch):
     from nemoguardian.adapters import discord as discord_adapter
 

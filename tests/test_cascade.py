@@ -370,6 +370,50 @@ def test_deep_mode_runs_triage_when_models_available():
     }]
 
 
+def test_deep_mode_skips_triage_when_guards_agree():
+    # Unanimous local guards must NOT pay for the 550B adjudicator — that was the
+    # ~30s-on-camera bug. Triage only fires on a real disagreement.
+    cascade = Cascade(CascadeConfig(enable_triage=True))
+    cascade._qwen_gen = StaticModel(VerdictLabel.UNSAFE, score=0.95, categories=["PII"])
+    cascade._csr = StaticModel(VerdictLabel.UNSAFE, score=0.92, categories=["PII"])
+    cascade._triage = StaticTriage()
+
+    result = cascade.moderate(
+        ModerateRequest(text="agreement", policy="block PII", mode=Mode.DEEP)
+    )
+
+    assert "triage" not in result.model_verdicts
+    assert set(result.model_verdicts) == {"qwen3_guard_gen", "nemotron_csr"}
+    assert cascade._triage.calls == []
+    assert any("triage skipped" in r for r in result.reasons)
+
+
+def test_deep_mode_forces_triage_when_disagreement_gate_disabled():
+    cascade = Cascade(
+        CascadeConfig(enable_triage=True, triage_on_disagreement_only=False)
+    )
+    cascade._qwen_gen = StaticModel(VerdictLabel.UNSAFE, score=0.95)
+    cascade._csr = StaticModel(VerdictLabel.UNSAFE, score=0.93)
+    cascade._triage = StaticTriage()
+
+    result = cascade.moderate(ModerateRequest(text="agreement", mode=Mode.DEEP))
+
+    assert "triage" in result.model_verdicts
+    assert len(cascade._triage.calls) == 1
+
+
+def test_deep_mode_triages_same_label_when_score_gap_exceeds_band():
+    # Same label but a wide score gap is real uncertainty → adjudicate.
+    cascade = Cascade(CascadeConfig(enable_triage=True, triage_score_band=0.3))
+    cascade._qwen_gen = StaticModel(VerdictLabel.UNSAFE, score=0.95)
+    cascade._csr = StaticModel(VerdictLabel.UNSAFE, score=0.40)
+    cascade._triage = StaticTriage()
+
+    result = cascade.moderate(ModerateRequest(text="wide gap", mode=Mode.DEEP))
+
+    assert "triage" in result.model_verdicts
+
+
 def test_stream_document_verdict_scores_safe_and_controversial_tokens():
     class MixedStream:
         _loaded = True
