@@ -27,6 +27,14 @@ class EvalCase:
     label: str  # "safe" | "unsafe"  (gold binary truth)
     category: str
     policy: str | None = None
+    # Coarse triage bucket (descriptive only; scoring still uses ``label``):
+    # "safe" | "unsafe" | "controversial" | "adversarial". Optional.
+    bucket: str | None = None
+    # When set, asserts whether the DETERMINISTIC prompt-injection detector
+    # should fire on this case: ``True`` for real injections, ``False`` for
+    # benign look-alikes. ``None`` means the deterministic layer is not the
+    # responsible party (a content guard's job) and the adversarial suite skips it.
+    expect_inject: bool | None = None
 
     @property
     def is_unsafe(self) -> bool:
@@ -65,12 +73,19 @@ def _parse_row(row: dict, path: Path, lineno: int) -> EvalCase:
         raise ValueError(
             f"{path}:{lineno}: label must be one of {sorted(_GOLD_LABELS)}, got {row['label']!r}"
         )
+    expect_inject = row.get("expect_inject")
+    if expect_inject is not None and not isinstance(expect_inject, bool):
+        raise ValueError(
+            f"{path}:{lineno}: expect_inject must be a bool, got {expect_inject!r}"
+        )
     return EvalCase(
         id=str(row["id"]),
         text=str(row["text"]),
         label=label,
         category=str(row["category"]),
         policy=row.get("policy"),
+        bucket=str(row["bucket"]) if row.get("bucket") is not None else None,
+        expect_inject=expect_inject,
     )
 
 
