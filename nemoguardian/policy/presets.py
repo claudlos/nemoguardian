@@ -52,10 +52,58 @@ GENERIC_WEBHOOK: dict = {
 }
 
 
+SLACK_DEFAULT: dict = {
+    "name": "slack-default",
+    "description": "Workspace defaults — block PII, self-harm, and violent content.",
+    "rules": [
+        {
+            "id": "force-block-pii",
+            "when": {"categories_include": ["PII"]},
+            "then": {"final_label": "unsafe", "final_score": 1.0},
+        },
+        {
+            "id": "force-block-self-harm",
+            "when": {"categories_include": ["Suicide & Self-Harm"]},
+            "then": {"final_label": "unsafe", "final_score": 1.0},
+        },
+        {
+            "id": "force-block-violent",
+            "when": {"categories_include": ["Violent"]},
+            "then": {"final_label": "unsafe", "final_score": 1.0},
+        },
+    ],
+}
+
+
+TELEGRAM_DEFAULT: dict = {
+    "name": "telegram-default",
+    "description": "Group/channel defaults — block PII, self-harm, and violent content.",
+    "rules": [
+        {
+            "id": "force-block-pii",
+            "when": {"categories_include": ["PII"]},
+            "then": {"final_label": "unsafe", "final_score": 1.0},
+        },
+        {
+            "id": "force-block-self-harm",
+            "when": {"categories_include": ["Suicide & Self-Harm"]},
+            "then": {"final_label": "unsafe", "final_score": 1.0},
+        },
+        {
+            "id": "force-block-violent",
+            "when": {"categories_include": ["Violent"]},
+            "then": {"final_label": "unsafe", "final_score": 1.0},
+        },
+    ],
+}
+
+
 PRESETS: dict[str, dict] = {
     "discord": DISCORD_DEFAULT,
     "twitch": TWITCH_CHAT,
     "generic": GENERIC_WEBHOOK,
+    "slack": SLACK_DEFAULT,
+    "telegram": TELEGRAM_DEFAULT,
 }
 
 
@@ -65,4 +113,12 @@ def get_preset(name: str) -> NemoclawPolicy:
     return NemoclawPolicy.from_dict(PRESETS[name])
 
 
-__all__ = ["DISCORD_DEFAULT", "GENERIC_WEBHOOK", "PRESETS", "TWITCH_CHAT", "get_preset"]
+__all__ = [
+    "DISCORD_DEFAULT",
+    "GENERIC_WEBHOOK",
+    "PRESETS",
+    "SLACK_DEFAULT",
+    "TELEGRAM_DEFAULT",
+    "TWITCH_CHAT",
+    "get_preset",
+]

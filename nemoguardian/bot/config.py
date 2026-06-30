@@ -56,6 +56,14 @@ class BotConfig:
                 mode=Mode.FAST,
                 public_warning=False,
             )
+        if platform_enum == Platform.SLACK:
+            return cls(platform=platform_enum, workspace_id=str(workspace_id), policy_preset="slack")
+        if platform_enum == Platform.TELEGRAM:
+            return cls(
+                platform=platform_enum,
+                workspace_id=str(workspace_id),
+                policy_preset="telegram",
+            )
         return cls(
             platform=platform_enum,
             workspace_id=str(workspace_id),
