@@ -1,4 +1,4 @@
-"""Platform adapters (Discord, Twitch, generic webhook).
+"""Platform adapters (Discord, Slack, Telegram, Twitch, generic webhook).
 
 Every adapter conforms to the shared :class:`~nemoguardian.adapters.base.PlatformAdapter`
 interface and declares its normalized :class:`~nemoguardian.bot.types.ModerationAction`
@@ -6,7 +6,7 @@ capabilities; :func:`~nemoguardian.adapters.base.degrade_action` gracefully degr
 any action a platform cannot perform to ``flag`` with an auditable reason.
 """
 
-from nemoguardian.adapters import base, discord, slack, twitch, webhook
+from nemoguardian.adapters import base, discord, slack, telegram, twitch, webhook
 from nemoguardian.adapters.base import (
     DEGRADE_TARGET,
     NORMALIZED_ACTIONS,
@@ -26,6 +26,7 @@ __all__ = [
     "discord",
     "slack",
     "supports",
+    "telegram",
     "twitch",
     "webhook",
 ]
