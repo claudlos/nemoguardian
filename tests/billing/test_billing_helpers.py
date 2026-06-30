@@ -149,6 +149,92 @@ def test_checkout_falls_back_to_demo_on_stripe_error(monkeypatch):
     assert db.get_customer_by_email("err@example.com") is not None
 
 
+def test_gpu_credit_checkout_demo_mode_records_credit():
+    session = checkout.create_gpu_credit_checkout_session(
+        email="gpu@example.com",
+        amount_cents=2_500,
+        success_url="https://app.test/success",
+        cancel_url="https://app.test/cancel",
+    )
+
+    customer = db.get_customer_by_email("gpu@example.com")
+    assert customer is not None
+    assert session.demo_mode is True
+    assert session.customer_id == customer.id
+    assert session.amount_cents == 2_500
+    assert session.balance_cents == 2_500
+    assert db.gpu_credit_balance_cents(customer.id) == 2_500
+
+
+def test_gpu_credit_checkout_uses_stripe_payment_mode(monkeypatch):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test")
+    calls: dict[str, object] = {}
+
+    class FakeCustomer:
+        @staticmethod
+        def create(*, email: str):
+            calls["created_customer_email"] = email
+            return SimpleNamespace(id="cus_gpu")
+
+        @staticmethod
+        def retrieve(customer_id: str):
+            raise AssertionError(f"unexpected retrieve: {customer_id}")
+
+    class FakeCheckoutSession:
+        @staticmethod
+        def create(**kwargs):
+            calls["checkout_kwargs"] = kwargs
+            return SimpleNamespace(id="cs_gpu", url="https://stripe.test/gpu")
+
+    fake_stripe = _install_stripe(
+        monkeypatch,
+        SimpleNamespace(
+            Customer=FakeCustomer,
+            checkout=SimpleNamespace(Session=FakeCheckoutSession),
+        ),
+    )
+
+    session = checkout.create_gpu_credit_checkout_session(
+        email="gpu-live@example.com",
+        amount_cents=3_000,
+        success_url="https://app.test/success",
+        cancel_url="https://app.test/cancel",
+    )
+
+    assert fake_stripe.api_key == "sk_test"
+    assert session.demo_mode is False
+    assert session.session_id == "cs_gpu"
+    kwargs = calls["checkout_kwargs"]
+    assert kwargs["mode"] == "payment"
+    assert kwargs["customer"] == "cus_gpu"
+    assert kwargs["line_items"][0]["price_data"]["unit_amount"] == 3_000
+    assert kwargs["metadata"]["nemoguardian_checkout_kind"] == "gpu_credit"
+    assert kwargs["metadata"]["nemoguardian_gpu_credit_cents"] == "3000"
+
+
+def test_gpu_credit_checkout_does_not_credit_on_live_stripe_error(monkeypatch):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test")
+
+    class BrokenCustomer:
+        @staticmethod
+        def create(*, email: str):
+            raise RuntimeError("stripe unavailable")
+
+    _install_stripe(monkeypatch, SimpleNamespace(Customer=BrokenCustomer))
+
+    with pytest.raises(RuntimeError, match="Stripe GPU credit checkout failed"):
+        checkout.create_gpu_credit_checkout_session(
+            email="gpu-error@example.com",
+            amount_cents=3_000,
+            success_url="https://app.test/success",
+            cancel_url="https://app.test/cancel",
+        )
+
+    customer = db.get_customer_by_email("gpu-error@example.com")
+    assert customer is not None
+    assert db.gpu_credit_balance_cents(customer.id) == 0
+
+
 def test_portal_falls_back_to_demo_on_stripe_error(monkeypatch):
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test")
     customer = db.upsert_customer(email="portal-error@example.com", stripe_customer_id="cus_portal")

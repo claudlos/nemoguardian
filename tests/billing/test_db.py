@@ -170,3 +170,86 @@ def test_provisioning_job_lifecycle():
 
     with pytest.raises(KeyError, match="no provisioning job with id 999"):
         db.get_provisioning_job(999)
+
+
+def test_gpu_credit_ledger_topup_is_idempotent_and_listable():
+    customer = db.upsert_customer(email="credits@example.com")
+
+    first = db.record_gpu_credit_event(
+        customer_id=customer.id,
+        event_type="stripe_topup",
+        amount_cents=2500,
+        stripe_checkout_session_id="cs_test_123",
+        stripe_payment_intent_id="pi_test_123",
+        description="Stripe GPU credit top-up",
+        metadata={"source": "stripe"},
+    )
+    second = db.record_gpu_credit_event(
+        customer_id=customer.id,
+        event_type="stripe_topup",
+        amount_cents=2500,
+        stripe_checkout_session_id="cs_test_123",
+        description="webhook retry",
+    )
+
+    assert second.id == first.id
+    assert db.gpu_credit_balance_cents(customer.id) == 2500
+    assert db.get_gpu_credit_event_by_checkout_session("cs_test_123") == first
+    assert db.get_gpu_credit_event_by_checkout_session("missing") is None
+    events = db.list_gpu_credit_events(customer.id)
+    assert events == [first]
+    assert events[0].metadata == {"source": "stripe"}
+
+
+def test_gpu_credit_ledger_rejects_zero_amount_and_missing_event():
+    customer = db.upsert_customer(email="zero@example.com")
+
+    with pytest.raises(ValueError, match="amount cannot be zero"):
+        db.record_gpu_credit_event(
+            customer_id=customer.id,
+            event_type="manual",
+            amount_cents=0,
+        )
+
+    with pytest.raises(KeyError, match="no GPU credit event with id 999"):
+        db.get_gpu_credit_event(999)
+
+
+def test_reserve_gpu_credits_debits_balance_atomically():
+    customer = db.upsert_customer(email="reserve@example.com")
+    job = db.create_provisioning_job(customer.id, tier=Tier.SELF_HOSTED, provider="vastai")
+    db.record_gpu_credit_event(
+        customer_id=customer.id,
+        event_type="stripe_topup",
+        amount_cents=5000,
+        stripe_checkout_session_id="cs_reserve",
+    )
+
+    reservation = db.reserve_gpu_credits(
+        customer_id=customer.id,
+        amount_cents=1200,
+        provider="vastai",
+        job_id=job.id,
+        description="Reserve RTX 3090 test run",
+        metadata={"gpu": "RTX 3090"},
+    )
+
+    assert reservation.event_type == "provision_reserve"
+    assert reservation.amount_cents == -1200
+    assert reservation.provider == "vastai"
+    assert reservation.job_id == job.id
+    assert reservation.metadata == {"gpu": "RTX 3090"}
+    assert db.gpu_credit_balance_cents(customer.id) == 3800
+    assert [event.id for event in db.list_gpu_credit_events(customer.id, limit=1)] == [
+        reservation.id
+    ]
+
+
+def test_reserve_gpu_credits_rejects_invalid_or_insufficient_amounts():
+    customer = db.upsert_customer(email="insufficient@example.com")
+
+    with pytest.raises(ValueError, match="reservation amount must be positive"):
+        db.reserve_gpu_credits(customer_id=customer.id, amount_cents=0, provider="vastai")
+
+    with pytest.raises(ValueError, match="insufficient GPU credits"):
+        db.reserve_gpu_credits(customer_id=customer.id, amount_cents=100, provider="vastai")

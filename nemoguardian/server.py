@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import os
+from decimal import ROUND_CEILING, Decimal
 from pathlib import Path
 from typing import Annotated, ClassVar
 from uuid import uuid4
@@ -26,6 +27,11 @@ from nemoguardian.billing.schemas import (
     CheckoutResponse,
     CreateKeyRequest,
     CreateKeyResponse,
+    GpuCreditBalanceResponse,
+    GpuCreditCheckoutRequest,
+    GpuCreditCheckoutResponse,
+    GpuCreditCheckoutStatusResponse,
+    GpuCreditEventResponse,
     PortalRequest,
     PortalResponse,
     ProvisioningRequest,
@@ -38,12 +44,11 @@ from nemoguardian.policy.presets import PRESETS, get_preset
 from nemoguardian.providers import (
     ProviderName,
     offers_fitting_cascade,
-    provision_cheapest_fit,
 )
 from nemoguardian.providers import (
     list_providers as providers_list,
 )
-from nemoguardian.providers.base import CASCADE_VRAM_COMFORT_GB, ProvisionError
+from nemoguardian.providers.base import CASCADE_VRAM_COMFORT_GB
 from nemoguardian.providers.registry import default_registry as providers_registry
 from nemoguardian.schemas import (
     HealthResponse,
@@ -316,6 +321,78 @@ async def billing_checkout_endpoint(req: CheckoutRequest) -> CheckoutResponse:
     )
 
 
+@app.post("/billing/gpu-credits/checkout", response_model=GpuCreditCheckoutResponse)
+async def billing_gpu_credit_checkout(req: GpuCreditCheckoutRequest) -> GpuCreditCheckoutResponse:
+    """Create a Stripe one-time checkout to fund GPU rental credits."""
+    try:
+        session = billing_checkout.create_gpu_credit_checkout_session(
+            email=req.email,
+            amount_cents=req.amount_cents,
+            success_url=req.success_url,
+            cancel_url=req.cancel_url,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    return GpuCreditCheckoutResponse(
+        session_id=session.session_id,
+        url=session.url,
+        demo_mode=session.demo_mode,
+        customer_id=session.customer_id,
+        amount_cents=session.amount_cents,
+        balance_cents=session.balance_cents,
+    )
+
+
+@app.get("/billing/gpu-credits/checkout-status", response_model=GpuCreditCheckoutStatusResponse)
+async def billing_gpu_credit_checkout_status(
+    session_id: Annotated[str, Query(min_length=3, max_length=255)],
+) -> GpuCreditCheckoutStatusResponse:
+    """Show whether a Stripe GPU-credit Checkout session has reached the ledger."""
+    event = billing_db.get_gpu_credit_event_by_checkout_session(session_id)
+    if event is None:
+        return GpuCreditCheckoutStatusResponse(session_id=session_id, credited=False)
+    return GpuCreditCheckoutStatusResponse(
+        session_id=session_id,
+        credited=True,
+        amount_cents=event.amount_cents,
+        balance_cents=billing_db.gpu_credit_balance_cents(event.customer_id),
+        currency=event.currency,
+        event_id=event.id,
+        occurred_at=event.occurred_at,
+    )
+
+
+@app.get("/billing/gpu-credits", response_model=GpuCreditBalanceResponse)
+async def billing_gpu_credit_balance(
+    auth: billing_auth.AuthContext = Depends(billing_auth.require_api_key),
+    limit: Annotated[int, Query(ge=0, le=100)] = 25,
+) -> GpuCreditBalanceResponse:
+    """Show the authenticated customer's GPU credit balance and recent ledger events."""
+    events = billing_db.list_gpu_credit_events(auth.customer.id, limit=limit)
+    return GpuCreditBalanceResponse(
+        customer_id=auth.customer.id,
+        email=auth.customer.email,
+        balance_cents=billing_db.gpu_credit_balance_cents(auth.customer.id),
+        events=[
+            GpuCreditEventResponse(
+                id=event.id,
+                event_type=event.event_type,
+                amount_cents=event.amount_cents,
+                currency=event.currency,
+                provider=event.provider,
+                job_id=event.job_id,
+                stripe_checkout_session_id=event.stripe_checkout_session_id,
+                stripe_payment_intent_id=event.stripe_payment_intent_id,
+                description=event.description,
+                occurred_at=event.occurred_at,
+            )
+            for event in events
+        ],
+    )
+
+
 @app.post("/billing/webhook")
 async def billing_webhook_endpoint(request: Request) -> dict:
     """Stripe webhook receiver (subscription lifecycle)."""
@@ -483,12 +560,36 @@ async def providers_offers(
     }
 
 
+async def _select_cheapest_offer(*, max_price_usd: float | None = None):
+    reg = providers_registry()
+    all_offers = []
+    for provider in reg.all():
+        try:
+            all_offers.extend(await provider.list_offers(max_price_usd=max_price_usd))
+        except Exception:
+            continue
+    fits = offers_fitting_cascade(all_offers)
+    if not fits:
+        raise HTTPException(
+            404,
+            "no offers fit the cascade (need >=24GB VRAM)"
+            + (f" under ${max_price_usd}/hr" if max_price_usd else ""),
+        )
+    return sorted(fits, key=lambda offer: offer.price_per_hour_usd)[0]
+
+
+def _gpu_credit_required_cents(hourly_price_usd: float, reserve_hours: float) -> int:
+    cents = Decimal(str(hourly_price_usd)) * Decimal(str(reserve_hours)) * Decimal("100")
+    return max(1, int(cents.to_integral_value(rounding=ROUND_CEILING)))
+
+
 @app.post("/billing/provision/cheapest")
 async def billing_provision_cheapest(
     auth: billing_auth.AuthContext = Depends(billing_auth.require_api_key),
     ssh_public_key: Annotated[str | None, Body()] = None,
     image: Annotated[str, Body()] = "nemoguardian/self-hosted:latest",
     max_price_usd: Annotated[float | None, Body()] = None,
+    reserve_hours: Annotated[float, Body(ge=0.25, le=168.0)] = 3.0,
 ) -> ProvisioningResponse:
     """Pick the cheapest viable offer across all providers and provision it.
 
@@ -500,6 +601,35 @@ async def billing_provision_cheapest(
             detail="self-hosted provisioning requires the self_hosted plan; "
                    "upgrade at /billing/checkout?plan=self_hosted",
         )
+    offer = await _select_cheapest_offer(max_price_usd=max_price_usd)
+    reserve_cents = _gpu_credit_required_cents(offer.price_per_hour_usd, reserve_hours)
+    job = billing_db.create_provisioning_job(
+        customer_id=auth.customer.id,
+        tier=auth.plan.tier,
+        provider=offer.provider.value,
+    )
+    try:
+        billing_db.reserve_gpu_credits(
+            customer_id=auth.customer.id,
+            amount_cents=reserve_cents,
+            provider=offer.provider.value,
+            job_id=job.id,
+            description=f"Reserve {reserve_hours:g}h for {offer.provider.value} {offer.gpu_model}",
+            metadata={"offer": offer.to_dict(), "reserve_hours": reserve_hours},
+        )
+    except ValueError as exc:
+        billing_db.update_provisioning_job(job.id, status="failed", error_message=str(exc))
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "error": "insufficient_gpu_credits",
+                "message": str(exc),
+                "required_cents": reserve_cents,
+                "balance_cents": billing_db.gpu_credit_balance_cents(auth.customer.id),
+                "top_up_url": "/billing/gpu-credits/checkout",
+            },
+        ) from exc
+
     env = {
         "NEMOGUARDIAN_API_KEY": auth.raw_key,
         "STRIPE_CUSTOMER_ID": auth.customer.stripe_customer_id or "",
@@ -507,22 +637,25 @@ async def billing_provision_cheapest(
         "CASCADE_MODE": "standard",
     }
     try:
-        offer, instance = await provision_cheapest_fit(
+        instance = await providers_registry().get(offer.provider).provision(
+            offer,
             ssh_public_key=ssh_public_key,
             image=image,
             env=env,
-            max_price_usd=max_price_usd,
         )
     except Exception as exc:
+        billing_db.record_gpu_credit_event(
+            customer_id=auth.customer.id,
+            event_type="provision_refund",
+            amount_cents=reserve_cents,
+            provider=offer.provider.value,
+            job_id=job.id,
+            description="Refund GPU credit reservation after provisioning failure",
+            metadata={"error": str(exc)},
+        )
+        billing_db.update_provisioning_job(job.id, status="failed", error_message=str(exc))
         raise HTTPException(502, f"provisioning failed: {exc}") from exc
 
-    # Persist the job so the customer can poll status.
-    provider_enum = ProviderName(offer.provider.value)
-    job = billing_db.create_provisioning_job(
-        customer_id=auth.customer.id,
-        tier=auth.plan.tier,
-        provider=provider_enum.value,
-    )
     billing_db.update_provisioning_job(
         job.id,
         status="live" if instance.state.value == "live" else "provisioning",
@@ -537,6 +670,11 @@ async def billing_provision_cheapest(
         instance_id=instance.instance_id,
         endpoint_url=instance.endpoint_url,
         ssh_command=instance.ssh_command,
+        provider=offer.provider.value,
+        hourly_price_usd=offer.price_per_hour_usd,
+        reserve_hours=reserve_hours,
+        gpu_credit_reserved_cents=reserve_cents,
+        gpu_credit_balance_cents=billing_db.gpu_credit_balance_cents(auth.customer.id),
     )
 
 
@@ -549,6 +687,7 @@ async def billing_provision_specific(
     max_price_usd: Annotated[float | None, Body()] = None,
     ssh_public_key: Annotated[str | None, Body()] = None,
     image: Annotated[str, Body()] = "nemoguardian/self-hosted:latest",
+    reserve_hours: Annotated[float, Body(ge=0.25, le=168.0)] = 3.0,
 ) -> ProvisioningResponse:
     """Provision on a specific provider (e.g. 'hetzner', 'digitalocean')."""
     if "deploy.self_hosted" not in auth.plan.features:
@@ -569,6 +708,31 @@ async def billing_provision_specific(
     if not fits:
         raise HTTPException(404, f"no fitting offers on {provider_name} for that filter")
     offer = next((o for o in fits if o.offer_id == offer_id), fits[0])
+    reserve_cents = _gpu_credit_required_cents(offer.price_per_hour_usd, reserve_hours)
+    job = billing_db.create_provisioning_job(
+        customer_id=auth.customer.id, tier=auth.plan.tier, provider=provider_name,
+    )
+    try:
+        billing_db.reserve_gpu_credits(
+            customer_id=auth.customer.id,
+            amount_cents=reserve_cents,
+            provider=provider_name,
+            job_id=job.id,
+            description=f"Reserve {reserve_hours:g}h for {provider_name} {offer.gpu_model}",
+            metadata={"offer": offer.to_dict(), "reserve_hours": reserve_hours},
+        )
+    except ValueError as exc:
+        billing_db.update_provisioning_job(job.id, status="failed", error_message=str(exc))
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "error": "insufficient_gpu_credits",
+                "message": str(exc),
+                "required_cents": reserve_cents,
+                "balance_cents": billing_db.gpu_credit_balance_cents(auth.customer.id),
+                "top_up_url": "/billing/gpu-credits/checkout",
+            },
+        ) from exc
 
     env = {
         "NEMOGUARDIAN_API_KEY": auth.raw_key,
@@ -580,12 +744,19 @@ async def billing_provision_specific(
         instance = await provider.provision(
             offer, ssh_public_key=ssh_public_key, image=image, env=env,
         )
-    except ProvisionError as exc:
+    except Exception as exc:
+        billing_db.record_gpu_credit_event(
+            customer_id=auth.customer.id,
+            event_type="provision_refund",
+            amount_cents=reserve_cents,
+            provider=provider_name,
+            job_id=job.id,
+            description="Refund GPU credit reservation after provisioning failure",
+            metadata={"error": str(exc)},
+        )
+        billing_db.update_provisioning_job(job.id, status="failed", error_message=str(exc))
         raise HTTPException(502, f"{provider_name} provisioning failed: {exc}") from exc
 
-    job = billing_db.create_provisioning_job(
-        customer_id=auth.customer.id, tier=auth.plan.tier, provider=provider_name,
-    )
     billing_db.update_provisioning_job(
         job.id,
         status="live" if instance.state.value == "live" else "provisioning",
@@ -600,6 +771,11 @@ async def billing_provision_specific(
         instance_id=instance.instance_id,
         endpoint_url=instance.endpoint_url,
         ssh_command=instance.ssh_command,
+        provider=provider_name,
+        hourly_price_usd=offer.price_per_hour_usd,
+        reserve_hours=reserve_hours,
+        gpu_credit_reserved_cents=reserve_cents,
+        gpu_credit_balance_cents=billing_db.gpu_credit_balance_cents(auth.customer.id),
     )
 
 

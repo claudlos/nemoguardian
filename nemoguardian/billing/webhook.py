@@ -109,6 +109,9 @@ async def handle_stripe_webhook(request: Request) -> dict[str, Any]:
 
 def _on_checkout_completed(session: dict[str, Any]) -> dict[str, Any]:
     metadata = session.get("metadata", {}) or {}
+    if metadata.get("nemoguardian_checkout_kind") == "gpu_credit":
+        return _on_gpu_credit_checkout_completed(session)
+
     tier = _tier_from_metadata(metadata)
     if tier is None:
         return {"ignored": True, "reason": "no tier metadata"}
@@ -158,6 +161,73 @@ def _on_checkout_completed(session: dict[str, Any]) -> dict[str, Any]:
         "api_key_provisioned": True,
         "api_key_id": key_record.id,
     }
+
+
+def _on_gpu_credit_checkout_completed(session: dict[str, Any]) -> dict[str, Any]:
+    metadata = session.get("metadata", {}) or {}
+    customer = _resolve_customer_from_checkout(session)
+    if customer is None:
+        return {"ignored": True, "reason": "no matching customer"}
+
+    amount_cents = _gpu_credit_amount_cents(session)
+    if amount_cents <= 0:
+        return {"ignored": True, "reason": "no GPU credit amount"}
+
+    event = db.record_gpu_credit_event(
+        customer_id=customer.id,
+        event_type="stripe_topup",
+        amount_cents=amount_cents,
+        provider="stripe",
+        stripe_checkout_session_id=session.get("id"),
+        stripe_payment_intent_id=session.get("payment_intent"),
+        description="Stripe GPU credit top-up",
+        metadata={
+            "stripe_customer_id": session.get("customer"),
+            "metadata_amount_cents": metadata.get("nemoguardian_gpu_credit_cents"),
+        },
+    )
+    return {
+        "handled": True,
+        "customer_id": customer.id,
+        "gpu_credit_applied": True,
+        "gpu_credit_event_id": event.id,
+        "amount_cents": event.amount_cents,
+        "balance_cents": db.gpu_credit_balance_cents(customer.id),
+    }
+
+
+def _resolve_customer_from_checkout(session: dict[str, Any]) -> db.Customer | None:
+    metadata = session.get("metadata", {}) or {}
+    customer_id_meta = metadata.get("nemoguardian_customer_id")
+    stripe_customer_id = session.get("customer")
+    customer_email = session.get("customer_details", {}).get("email") or session.get("customer_email")
+
+    customer = None
+    if customer_id_meta:
+        with suppress(KeyError, ValueError):
+            customer = db.get_customer(int(customer_id_meta))
+    if customer is None and stripe_customer_id:
+        customer = db.get_customer_by_stripe_id(stripe_customer_id)
+    if customer is None and customer_email:
+        customer = db.upsert_customer(email=customer_email, stripe_customer_id=stripe_customer_id)
+    elif customer is not None and stripe_customer_id:
+        db.upsert_customer(email=customer.email, stripe_customer_id=stripe_customer_id)
+        customer = db.get_customer(customer.id)
+    return customer
+
+
+def _gpu_credit_amount_cents(session: dict[str, Any]) -> int:
+    metadata = session.get("metadata", {}) or {}
+    for value in (
+        session.get("amount_total"),
+        session.get("amount_subtotal"),
+        metadata.get("nemoguardian_gpu_credit_cents"),
+    ):
+        with suppress(TypeError, ValueError):
+            amount = int(value)
+            if amount > 0:
+                return amount
+    return 0
 
 
 def _on_subscription_change(sub: dict[str, Any]) -> dict[str, Any]:

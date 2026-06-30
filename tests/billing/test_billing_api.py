@@ -172,6 +172,16 @@ def _auth_headers_for_tier(tier: Tier, *, email: str = "tier@example.com") -> tu
     return {"Authorization": f"Bearer {raw}"}, customer
 
 
+def _fund_gpu_credits(customer: billing_db.Customer, amount_cents: int = 10_000) -> None:
+    billing_db.record_gpu_credit_event(
+        customer_id=customer.id,
+        event_type="stripe_topup",
+        amount_cents=amount_cents,
+        stripe_checkout_session_id=f"cs_fund_{customer.id}_{amount_cents}",
+        description="Test GPU credit funding",
+    )
+
+
 def test_list_plans(client):
     r = client.get("/billing/plans")
     assert r.status_code == 200
@@ -193,6 +203,82 @@ def test_checkout_creates_customer(client):
     assert body["session_id"].startswith("demo_pro_")
     customer = billing_db.get_customer_by_email("buyer@example.com")
     assert customer is not None
+
+
+def test_gpu_credit_checkout_demo_credits_customer(client):
+    r = client.post(
+        "/billing/gpu-credits/checkout",
+        json={"email": "gpu-buyer@example.com", "amount_cents": 2_500},
+    )
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["demo_mode"] is True
+    assert body["amount_cents"] == 2_500
+    assert body["balance_cents"] == 2_500
+    customer = billing_db.get_customer_by_email("gpu-buyer@example.com")
+    assert customer is not None
+    assert billing_db.gpu_credit_balance_cents(customer.id) == 2_500
+
+
+def test_gpu_credit_balance_requires_api_key_and_lists_events(client):
+    headers, customer = _auth_headers_for_tier(
+        Tier.SELF_HOSTED, email="gpu-balance@example.com"
+    )
+    _fund_gpu_credits(customer, 2_500)
+
+    missing = client.get("/billing/gpu-credits")
+    assert missing.status_code == 401
+
+    r = client.get("/billing/gpu-credits", headers=headers)
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["customer_id"] == customer.id
+    assert body["balance_cents"] == 2_500
+    assert body["events"][0]["event_type"] == "stripe_topup"
+
+
+def test_gpu_credit_checkout_status_reports_pending_and_credit(client):
+    pending = client.get(
+        "/billing/gpu-credits/checkout-status",
+        params={"session_id": "cs_test_missing"},
+    )
+
+    assert pending.status_code == 200
+    assert pending.json() == {
+        "session_id": "cs_test_missing",
+        "credited": False,
+        "amount_cents": None,
+        "balance_cents": None,
+        "currency": "usd",
+        "event_id": None,
+        "occurred_at": None,
+    }
+
+    customer = billing_db.upsert_customer(email="gpu-status@example.com")
+    event = billing_db.record_gpu_credit_event(
+        customer_id=customer.id,
+        event_type="stripe_topup",
+        amount_cents=5_000,
+        stripe_checkout_session_id="cs_test_status",
+        stripe_payment_intent_id="pi_status",
+        description="Stripe GPU credit top-up",
+    )
+
+    credited = client.get(
+        "/billing/gpu-credits/checkout-status",
+        params={"session_id": "cs_test_status"},
+    )
+
+    assert credited.status_code == 200
+    body = credited.json()
+    assert body["session_id"] == "cs_test_status"
+    assert body["credited"] is True
+    assert body["amount_cents"] == 5_000
+    assert body["balance_cents"] == 5_000
+    assert body["event_id"] == event.id
+    assert body["occurred_at"] == event.occurred_at
 
 
 def test_webhook_checkout_completed_upgrades_tier(client, monkeypatch):
@@ -233,6 +319,47 @@ def test_webhook_checkout_completed_upgrades_tier(client, monkeypatch):
     upgraded = billing_db.get_customer(customer.id)
     assert upgraded.tier == "pro"
     assert upgraded.stripe_customer_id == "cus_test_X"
+
+
+def test_webhook_gpu_credit_checkout_adds_balance_idempotently(client, monkeypatch):
+    customer = billing_db.upsert_customer(
+        email="gpu-webhook@example.com", stripe_customer_id="cus_gpu"
+    )
+    payload = {
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "cs_gpu_topup",
+                "customer": "cus_gpu",
+                "payment_intent": "pi_gpu",
+                "amount_total": 3_500,
+                "metadata": {
+                    "nemoguardian_checkout_kind": "gpu_credit",
+                    "nemoguardian_customer_id": str(customer.id),
+                    "nemoguardian_gpu_credit_cents": "3500",
+                },
+            }
+        },
+    }
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
+    body, signature = _signed_payload(payload, "whsec_test")
+
+    first = client.post(
+        "/billing/webhook",
+        content=body,
+        headers={"Stripe-Signature": signature, "Content-Type": "application/json"},
+    )
+    second = client.post(
+        "/billing/webhook",
+        content=body,
+        headers={"Stripe-Signature": signature, "Content-Type": "application/json"},
+    )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json()["gpu_credit_applied"] is True
+    assert second.json()["gpu_credit_event_id"] == first.json()["gpu_credit_event_id"]
+    assert billing_db.gpu_credit_balance_cents(customer.id) == 3_500
 
 
 def test_webhook_signature_parser_rejects_malformed_headers(monkeypatch):
@@ -753,7 +880,7 @@ def test_billing_provision_cheapest_requires_self_hosted(client):
 
 def test_billing_provision_cheapest_persists_job(client, monkeypatch):
     headers, customer = _auth_headers_for_tier(Tier.SELF_HOSTED, email="cheapest@example.com")
-    captured: dict = {}
+    _fund_gpu_credits(customer, 10_000)
     offer = Offer(ProviderName.VAST_AI, "RTX 3090", 24, 0.07, "US", offer_id="fit")
     instance = Instance(
         provider=ProviderName.VAST_AI,
@@ -765,12 +892,8 @@ def test_billing_provision_cheapest_persists_job(client, monkeypatch):
         endpoint_url="https://vast.test",
         ssh_command="ssh root@vast.test",
     )
-
-    async def fake_provision_cheapest_fit(**kwargs):
-        captured.update(kwargs)
-        return offer, instance
-
-    monkeypatch.setattr(srv, "provision_cheapest_fit", fake_provision_cheapest_fit)
+    provider = FakeProvider([offer], instance=instance)
+    monkeypatch.setattr(srv, "providers_registry", lambda: FakeProviderRegistry([provider]))
 
     r = client.post(
         "/billing/provision/cheapest",
@@ -787,28 +910,47 @@ def test_billing_provision_cheapest_persists_job(client, monkeypatch):
     assert body["status"] == "live"
     assert body["instance_id"] == "vast-1"
     assert body["endpoint_url"] == "https://vast.test"
-    assert captured["ssh_public_key"] == "ssh-ed25519 AAAA test"
-    assert captured["image"] == "nemoguardian:test"
-    assert captured["max_price_usd"] == 0.10
-    assert captured["env"]["NEMOGUARDIAN_CUSTOMER_ID"] == str(customer.id)
-    assert captured["env"]["NEMOGUARDIAN_API_KEY"].startswith("nmg_")
+    assert body["gpu_credit_reserved_cents"] == 21
+    assert body["gpu_credit_balance_cents"] == 9_979
+    assert provider.provision_calls[0]["ssh_public_key"] == "ssh-ed25519 AAAA test"
+    assert provider.provision_calls[0]["image"] == "nemoguardian:test"
+    assert provider.provision_calls[0]["env"]["NEMOGUARDIAN_CUSTOMER_ID"] == str(customer.id)
+    assert provider.provision_calls[0]["env"]["NEMOGUARDIAN_API_KEY"].startswith("nmg_")
     job = billing_db.get_provisioning_job(body["job_id"])
     assert job.customer_id == customer.id
     assert job.status == "live"
+    assert billing_db.gpu_credit_balance_cents(customer.id) == 9_979
 
 
 def test_billing_provision_cheapest_reports_provider_failure(client, monkeypatch):
-    headers, _customer = _auth_headers_for_tier(Tier.SELF_HOSTED, email="cheapest-fail@example.com")
-
-    async def fail_provision_cheapest_fit(**_kwargs):
-        raise RuntimeError("no capacity")
-
-    monkeypatch.setattr(srv, "provision_cheapest_fit", fail_provision_cheapest_fit)
+    headers, customer = _auth_headers_for_tier(
+        Tier.SELF_HOSTED, email="cheapest-fail@example.com"
+    )
+    _fund_gpu_credits(customer, 10_000)
+    offer = Offer(ProviderName.VAST_AI, "RTX 3090", 24, 0.07, "US", offer_id="fit")
+    provider = FakeProvider([offer], provision_error=RuntimeError("no capacity"))
+    monkeypatch.setattr(srv, "providers_registry", lambda: FakeProviderRegistry([provider]))
 
     r = client.post("/billing/provision/cheapest", headers=headers, json={})
 
     assert r.status_code == 502
     assert "provisioning failed: no capacity" in r.json()["detail"]
+    assert billing_db.gpu_credit_balance_cents(customer.id) == 10_000
+
+
+def test_billing_provision_cheapest_requires_gpu_credits(client, monkeypatch):
+    headers, _customer = _auth_headers_for_tier(
+        Tier.SELF_HOSTED, email="no-credits@example.com"
+    )
+    offer = Offer(ProviderName.VAST_AI, "RTX 3090", 24, 0.07, "US", offer_id="fit")
+    provider = FakeProvider([offer])
+    monkeypatch.setattr(srv, "providers_registry", lambda: FakeProviderRegistry([provider]))
+
+    r = client.post("/billing/provision/cheapest", headers=headers, json={})
+
+    assert r.status_code == 402
+    assert r.json()["detail"]["error"] == "insufficient_gpu_credits"
+    assert provider.provision_calls == []
 
 
 def test_billing_provision_specific_validates_provider_and_offer_filters(client, monkeypatch):
@@ -835,6 +977,7 @@ def test_billing_provision_specific_requires_self_hosted(client):
 
 def test_billing_provision_specific_persists_selected_offer(client, monkeypatch):
     headers, customer = _auth_headers_for_tier(Tier.SELF_HOSTED, email="specific-success@example.com")
+    _fund_gpu_credits(customer, 10_000)
     cheap = Offer(ProviderName.VAST_AI, "RTX 3090", 24, 0.07, "US", offer_id="cheap")
     selected = Offer(ProviderName.VAST_AI, "RTX 4090", 24, 0.12, "US", offer_id="selected")
     provider = FakeProvider([cheap, selected])
@@ -855,6 +998,8 @@ def test_billing_provision_specific_persists_selected_offer(client, monkeypatch)
     body = r.json()
     assert body["status"] == "live"
     assert body["instance_id"] == "fake-instance"
+    assert body["gpu_credit_reserved_cents"] == 36
+    assert body["gpu_credit_balance_cents"] == 9_964
     assert provider.provision_calls[0]["offer"].offer_id == "selected"
     assert provider.provision_calls[0]["ssh_public_key"] == "ssh-ed25519 AAAA test"
     assert provider.provision_calls[0]["image"] == "nemoguardian:test"
@@ -862,7 +1007,10 @@ def test_billing_provision_specific_persists_selected_offer(client, monkeypatch)
 
 
 def test_billing_provision_specific_reports_provider_error(client, monkeypatch):
-    headers, _customer = _auth_headers_for_tier(Tier.SELF_HOSTED, email="specific-error@example.com")
+    headers, customer = _auth_headers_for_tier(
+        Tier.SELF_HOSTED, email="specific-error@example.com"
+    )
+    _fund_gpu_credits(customer, 10_000)
     provider = FakeProvider(
         [Offer(ProviderName.VAST_AI, "RTX 3090", 24, 0.07, "US", offer_id="fit")],
         provision_error=ProvisionError("denied"),
@@ -873,6 +1021,7 @@ def test_billing_provision_specific_reports_provider_error(client, monkeypatch):
 
     assert r.status_code == 502
     assert "vastai provisioning failed: denied" in r.json()["detail"]
+    assert billing_db.gpu_credit_balance_cents(customer.id) == 10_000
 
 
 def _signed_payload(payload: dict, secret: str, *, timestamp: int | None = None) -> tuple[bytes, str]:

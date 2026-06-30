@@ -7,6 +7,7 @@ The same schema works on Postgres in production.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import secrets
 import sqlite3
@@ -84,6 +85,25 @@ CREATE TABLE IF NOT EXISTS provisioning_jobs (
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS gpu_credit_events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id     INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+    occurred_at     TEXT NOT NULL,
+    event_type      TEXT NOT NULL,           -- stripe_topup | provision_reserve | provision_refund | manual
+    amount_cents    INTEGER NOT NULL,        -- positive = credit, negative = debit/reserve
+    currency        TEXT NOT NULL DEFAULT 'usd',
+    provider        TEXT,
+    job_id          INTEGER REFERENCES provisioning_jobs(id) ON DELETE SET NULL,
+    stripe_checkout_session_id TEXT,
+    stripe_payment_intent_id   TEXT,
+    description     TEXT,
+    metadata_json   TEXT NOT NULL DEFAULT '{}',
+    UNIQUE(event_type, stripe_checkout_session_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_gpu_credit_customer_time
+ON gpu_credit_events(customer_id, occurred_at);
 """
 
 
@@ -488,9 +508,190 @@ def list_provisioning_jobs(customer_id: int) -> list[ProvisioningJob]:
     return [ProvisioningJob(**dict(r)) for r in rows]
 
 
+# --- GPU Credits ----------------------------------------------------------
+
+@dataclass
+class GpuCreditEvent:
+    id: int
+    customer_id: int
+    occurred_at: str
+    event_type: str
+    amount_cents: int
+    currency: str
+    provider: str | None
+    job_id: int | None
+    stripe_checkout_session_id: str | None
+    stripe_payment_intent_id: str | None
+    description: str | None
+    metadata_json: str
+
+    @property
+    def metadata(self) -> dict:
+        try:
+            data = json.loads(self.metadata_json)
+        except json.JSONDecodeError:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+
+def record_gpu_credit_event(
+    *,
+    customer_id: int,
+    event_type: str,
+    amount_cents: int,
+    currency: str = "usd",
+    provider: str | None = None,
+    job_id: int | None = None,
+    stripe_checkout_session_id: str | None = None,
+    stripe_payment_intent_id: str | None = None,
+    description: str | None = None,
+    metadata: dict | None = None,
+) -> GpuCreditEvent:
+    """Append a GPU-credit ledger event.
+
+    Stripe checkout top-ups are idempotent on ``(event_type,
+    stripe_checkout_session_id)`` so webhook retries do not double-credit a
+    wallet.
+    """
+    if amount_cents == 0:
+        raise ValueError("GPU credit event amount cannot be zero")
+
+    conn = init_db()
+    if stripe_checkout_session_id:
+        existing = conn.execute(
+            """SELECT * FROM gpu_credit_events
+               WHERE event_type = ? AND stripe_checkout_session_id = ?""",
+            (event_type, stripe_checkout_session_id),
+        ).fetchone()
+        if existing is not None:
+            return GpuCreditEvent(**dict(existing))
+
+    now = _now()
+    metadata_json = json.dumps(metadata or {}, sort_keys=True)
+    with _tx(conn):
+        cur = conn.execute(
+            """INSERT INTO gpu_credit_events (
+                   customer_id, occurred_at, event_type, amount_cents, currency,
+                   provider, job_id, stripe_checkout_session_id,
+                   stripe_payment_intent_id, description, metadata_json
+               )
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                customer_id,
+                now,
+                event_type,
+                int(amount_cents),
+                currency,
+                provider,
+                job_id,
+                stripe_checkout_session_id,
+                stripe_payment_intent_id,
+                description,
+                metadata_json,
+            ),
+        )
+        event_id = cur.lastrowid
+    return get_gpu_credit_event(event_id)
+
+
+def get_gpu_credit_event(event_id: int) -> GpuCreditEvent:
+    conn = init_db()
+    row = conn.execute("SELECT * FROM gpu_credit_events WHERE id = ?", (event_id,)).fetchone()
+    if row is None:
+        raise KeyError(f"no GPU credit event with id {event_id}")
+    return GpuCreditEvent(**dict(row))
+
+
+def get_gpu_credit_event_by_checkout_session(
+    stripe_checkout_session_id: str,
+) -> GpuCreditEvent | None:
+    conn = init_db()
+    row = conn.execute(
+        """SELECT * FROM gpu_credit_events
+           WHERE event_type = 'stripe_topup'
+             AND stripe_checkout_session_id = ?
+           ORDER BY id DESC
+           LIMIT 1""",
+        (stripe_checkout_session_id,),
+    ).fetchone()
+    return GpuCreditEvent(**dict(row)) if row else None
+
+
+def gpu_credit_balance_cents(customer_id: int | str) -> int:
+    conn = init_db()
+    row = conn.execute(
+        """SELECT COALESCE(SUM(amount_cents), 0) AS balance
+           FROM gpu_credit_events
+           WHERE customer_id = ?""",
+        (customer_id,),
+    ).fetchone()
+    return int(row["balance"])
+
+
+def list_gpu_credit_events(customer_id: int | str, *, limit: int = 50) -> list[GpuCreditEvent]:
+    conn = init_db()
+    rows = conn.execute(
+        """SELECT * FROM gpu_credit_events
+           WHERE customer_id = ?
+           ORDER BY id DESC
+           LIMIT ?""",
+        (customer_id, max(0, limit)),
+    ).fetchall()
+    return [GpuCreditEvent(**dict(row)) for row in rows]
+
+
+def reserve_gpu_credits(
+    *,
+    customer_id: int,
+    amount_cents: int,
+    provider: str,
+    job_id: int | None = None,
+    description: str | None = None,
+    metadata: dict | None = None,
+) -> GpuCreditEvent:
+    """Atomically debit GPU credits before provisioning rented capacity."""
+    if amount_cents <= 0:
+        raise ValueError("GPU credit reservation amount must be positive")
+
+    conn = init_db()
+    now = _now()
+    metadata_json = json.dumps(metadata or {}, sort_keys=True)
+    with _tx(conn):
+        row = conn.execute(
+            """SELECT COALESCE(SUM(amount_cents), 0) AS balance
+               FROM gpu_credit_events
+               WHERE customer_id = ?""",
+            (customer_id,),
+        ).fetchone()
+        balance = int(row["balance"])
+        if balance < amount_cents:
+            raise ValueError(
+                f"insufficient GPU credits: need {amount_cents} cents, have {balance} cents"
+            )
+        cur = conn.execute(
+            """INSERT INTO gpu_credit_events (
+                   customer_id, occurred_at, event_type, amount_cents, currency,
+                   provider, job_id, description, metadata_json
+               )
+               VALUES (?, ?, 'provision_reserve', ?, 'usd', ?, ?, ?, ?)""",
+            (
+                customer_id,
+                now,
+                -int(amount_cents),
+                provider,
+                job_id,
+                description,
+                metadata_json,
+            ),
+        )
+        event_id = cur.lastrowid
+    return get_gpu_credit_event(event_id)
+
+
 __all__ = [
     "ApiKey",
     "Customer",
+    "GpuCreditEvent",
     "ProvisioningJob",
     "Subscription",
     "UsageSummary",
@@ -499,13 +700,19 @@ __all__ = [
     "get_customer",
     "get_customer_by_email",
     "get_customer_by_stripe_id",
+    "get_gpu_credit_event",
+    "get_gpu_credit_event_by_checkout_session",
     "get_provisioning_job",
     "get_subscription",
+    "gpu_credit_balance_cents",
     "init_db",
     "list_api_keys",
+    "list_gpu_credit_events",
     "list_provisioning_jobs",
     "lookup_customer_by_api_key",
+    "record_gpu_credit_event",
     "record_usage",
+    "reserve_gpu_credits",
     "revoke_api_key",
     "set_customer_tier",
     "update_provisioning_job",
