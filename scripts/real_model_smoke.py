@@ -25,6 +25,14 @@ def main() -> int:
     from nemoguardian.schemas import Mode, ModerateRequest, VerdictLabel
 
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--profile",
+        help=(
+            "Apply a cascade hardware profile (e.g. 3090-smoke, 8b, 14b, "
+            "550b-triage) before any per-flag overrides. See "
+            "`nemoguardian profiles list`."
+        ),
+    )
     parser.add_argument("--deep", action="store_true", help="Also call configured triage API")
     parser.add_argument(
         "--text",
@@ -87,8 +95,11 @@ def main() -> int:
     parser.add_argument(
         "--min-vram-gb",
         type=float,
-        default=float(os.environ.get("NEMOGUARDIAN_SMOKE_MIN_VRAM_GB", "20")),
-        help="Minimum CUDA VRAM required before loading weights",
+        default=None,
+        help=(
+            "Minimum CUDA VRAM required before loading weights. Defaults to the "
+            "profile's smoke floor, then NEMOGUARDIAN_SMOKE_MIN_VRAM_GB, then 20."
+        ),
     )
     parser.add_argument(
         "--skip-preflight",
@@ -97,8 +108,9 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    min_vram_gb = _resolve_min_vram_gb(args)
     if not args.skip_preflight:
-        preflight_code = _preflight(deep=args.deep, min_vram_gb=args.min_vram_gb)
+        preflight_code = _preflight(deep=args.deep, min_vram_gb=min_vram_gb)
         if preflight_code:
             return preflight_code
 
@@ -128,10 +140,27 @@ def main() -> int:
     return 0
 
 
+def _resolve_min_vram_gb(args: argparse.Namespace) -> float:
+    """Pick the smoke VRAM floor: explicit flag > profile floor > env > 20."""
+    if getattr(args, "min_vram_gb", None) is not None:
+        return float(args.min_vram_gb)
+    profile_name = getattr(args, "profile", None)
+    if profile_name:
+        from nemoguardian.profiles import get_profile
+
+        return get_profile(profile_name).min_smoke_vram_gb
+    return float(os.environ.get("NEMOGUARDIAN_SMOKE_MIN_VRAM_GB", "20"))
+
+
 def _config_from_args(args: argparse.Namespace):
     from nemoguardian.cascade import CascadeConfig
 
     config = CascadeConfig.from_env()
+    profile_name = getattr(args, "profile", None)
+    if profile_name:
+        from nemoguardian.profiles import apply_profile_to_config, get_profile
+
+        config = apply_profile_to_config(config, get_profile(profile_name))
     if args.qwen_model:
         config.qwen_gen_model = args.qwen_model
     if args.qwen_stream_model:

@@ -16,6 +16,7 @@ import typer
 from nemoguardian.bot import AuditLog, Platform, since_hours_ago
 from nemoguardian.cascade import Cascade, CascadeConfig
 from nemoguardian.policy.presets import get_preset
+from nemoguardian.profiles_cli import profiles_app
 from nemoguardian.schemas import Mode, ModerateRequest, VerdictLabel
 
 app = typer.Typer(help="Multi-model LLM moderation cascade.")
@@ -404,6 +405,7 @@ def _echo_json(payload: Any) -> None:
 
 
 app.add_typer(audit_app, name="bot-audit")
+app.add_typer(profiles_app, name="profiles")
 
 
 if __name__ == "__main__":
