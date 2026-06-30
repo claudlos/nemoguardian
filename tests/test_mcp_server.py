@@ -51,16 +51,38 @@ def test_moderate_text_unknown_mode_falls_back_to_standard(monkeypatch):
 def test_gpu_credit_balance_shape(monkeypatch):
     import nemoguardian.billing.db as billing_db
 
-    monkeypatch.setattr(billing_db, "gpu_credit_balance_cents", lambda cid: 2500)
+    monkeypatch.setattr(billing_db, "gpu_credit_balance_cents", lambda cid: 2500, raising=False)
     monkeypatch.setattr(
-        billing_db, "list_gpu_credit_events", lambda cid, limit=10: [object(), object()]
+        billing_db,
+        "list_gpu_credit_events",
+        lambda cid, limit=10: [object(), object()],
+        raising=False,
     )
 
     out = mcp_server.gpu_credit_balance("cust_123")
 
     assert out == {
         "customer_id": "cust_123",
+        "available": True,
         "balance_cents": 2500,
         "balance_usd": 25.0,
         "recent_event_count": 2,
+    }
+
+
+def test_gpu_credit_balance_reports_unavailable_without_ledger(monkeypatch):
+    import nemoguardian.billing.db as billing_db
+
+    monkeypatch.delattr(billing_db, "gpu_credit_balance_cents", raising=False)
+    monkeypatch.delattr(billing_db, "list_gpu_credit_events", raising=False)
+
+    out = mcp_server.gpu_credit_balance("cust_123")
+
+    assert out == {
+        "customer_id": "cust_123",
+        "available": False,
+        "balance_cents": None,
+        "balance_usd": None,
+        "recent_event_count": 0,
+        "error": "GPU-credit ledger helpers are not available in this build",
     }

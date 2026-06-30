@@ -82,14 +82,27 @@ def gpu_credit_balance(customer_id: str) -> dict[str, Any]:
     """
     from nemoguardian.billing import db as billing_db
 
-    balance = int(billing_db.gpu_credit_balance_cents(customer_id))
+    balance_fn = getattr(billing_db, "gpu_credit_balance_cents", None)
+    if not callable(balance_fn):
+        return {
+            "customer_id": customer_id,
+            "available": False,
+            "balance_cents": None,
+            "balance_usd": None,
+            "recent_event_count": 0,
+            "error": "GPU-credit ledger helpers are not available in this build",
+        }
+
+    balance = int(balance_fn(customer_id))
     try:
-        recent = billing_db.list_gpu_credit_events(customer_id, limit=10)
+        events_fn = getattr(billing_db, "list_gpu_credit_events", None)
+        recent = events_fn(customer_id, limit=10) if callable(events_fn) else []
         recent_count = len(list(recent))
     except Exception:
         recent_count = 0
     return {
         "customer_id": customer_id,
+        "available": True,
         "balance_cents": balance,
         "balance_usd": round(balance / 100.0, 2),
         "recent_event_count": recent_count,
