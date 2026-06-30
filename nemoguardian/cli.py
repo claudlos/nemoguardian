@@ -13,6 +13,7 @@ from typing import Any
 
 import typer
 
+from nemoguardian import ops_cli
 from nemoguardian.bot import AuditLog, Platform, since_hours_ago
 from nemoguardian.cascade import Cascade, CascadeConfig
 from nemoguardian.policy.presets import get_preset
@@ -404,6 +405,7 @@ def _echo_json(payload: Any) -> None:
 
 
 app.add_typer(audit_app, name="bot-audit")
+app.add_typer(ops_cli.ops_app, name="gpu-ops")
 
 
 if __name__ == "__main__":
