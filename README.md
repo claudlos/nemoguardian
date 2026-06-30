@@ -57,11 +57,13 @@ the policy rule that fired (if any).
 | Qwen3Guard-Stream 0.6B (token-level) | ~1ms/token | streaming | obvious violations, PII, slurs as the LLM types |
 | Qwen3Guard-Gen 4B (full doc) | ~50ms | per-message | nuanced violations, multilingual (119 languages) |
 | Nemotron-CSR 4B (reasoning on) | ~200ms | per-message | custom policies ("no financial advice"), topic-following, jailbreak attempts |
-| Nemotron 3 Ultra triage | ~300ms | per-batch API call | explains disagreements between the two local guard models |
+| Nemotron 3 Ultra triage | provider-dependent; recorded free route ~30s | per-disagreement API call | explains disagreements between the two local guard models |
 
 The production API exposes `fast`, `standard`, and `deep` modes so callers can
-choose when to pay for the heavier reasoning path. The demo records `deep` mode
-explicitly to show the optional API-backed triage explanation.
+choose when to pay for the heavier reasoning path. Deep mode skips the external
+550B triage call when the local guards already agree, and uses it only for
+disagreement adjudication unless configured otherwise. The demo records `deep`
+mode explicitly to show the optional API-backed triage explanation.
 
 ## Quickstart
 
@@ -261,7 +263,8 @@ make final-submission-check FINAL_CHECK_FLAGS="--video-url https://<hosted-demo-
 - `standard` — Qwen3Guard-Gen + Nemotron-CSR (reasoning **off** for low latency). The
   two local guards run concurrently.
 - `deep` — Local guard stack with Nemotron-CSR reasoning **on**, plus API-backed
-  Nemotron 3 Ultra triage to adjudicate disagreements.
+  Nemotron 3 Ultra triage to adjudicate disagreements. By default, matching
+  local-guard verdicts skip the external triage call.
 
 `NEMOGUARDIAN_REASONING=false` forces reasoning off even in deep mode; reasoning is
 never on in standard mode. Set `NEMOGUARDIAN_CONCURRENT_LOCAL=false` to run the

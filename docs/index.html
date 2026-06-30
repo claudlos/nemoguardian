@@ -1277,7 +1277,7 @@
     stream:{name:"Qwen3Guard-Stream", role:"token-level streaming · PII &amp; slurs", spec:"0.6B · ~1ms/tok", key:"qwen3guard_stream"},
     gen:{name:"Qwen3Guard-Gen", role:"nuanced · multilingual (119 langs)", spec:"4B · ~50ms", key:"qwen3guard_gen"},
     csr:{name:"Nemotron-CSR", role:"custom policy · jailbreak detection", spec:"4B · ~200ms", key:"nemotron_csr"},
-    triage:{name:"Nemotron 3 Ultra", role:"adjudicates &amp; explains disagreements", spec:"550B · ~300ms", key:"nemotron_ultra"}
+    triage:{name:"Nemotron 3 Ultra", role:"adjudicates &amp; explains disagreements", spec:"550B · API route", key:"nemotron_ultra"}
   };
   var MODE_MODELS = { fast:["stream"], standard:["gen","csr"], deep:["gen","csr","triage"] };
   var MODE_LAT = { fast:"~1 ms / token", standard:"~250 ms", deep:"local + 550B triage" };
