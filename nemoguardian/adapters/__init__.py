@@ -6,7 +6,7 @@ capabilities; :func:`~nemoguardian.adapters.base.degrade_action` gracefully degr
 any action a platform cannot perform to ``flag`` with an auditable reason.
 """
 
-from nemoguardian.adapters import base, discord, twitch, webhook
+from nemoguardian.adapters import base, discord, slack, twitch, webhook
 from nemoguardian.adapters.base import (
     DEGRADE_TARGET,
     NORMALIZED_ACTIONS,
@@ -24,6 +24,7 @@ __all__ = [
     "base",
     "degrade_action",
     "discord",
+    "slack",
     "supports",
     "twitch",
     "webhook",
