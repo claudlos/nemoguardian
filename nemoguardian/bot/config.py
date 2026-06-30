@@ -39,6 +39,7 @@ class BotConfig:
     timeout_seconds: int = 600
     dm_users: bool = False
     dry_run: bool = False
+    review_queue: bool = True  # enqueue controversial/flagged cases when a ReviewService is wired in
     ignored_channel_ids: set[str] = field(default_factory=set)
     ignored_role_ids: set[str] = field(default_factory=set)
     exempt_user_ids: set[str] = field(default_factory=set)

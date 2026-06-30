@@ -17,10 +17,20 @@ from __future__ import annotations
 import asyncio
 import os
 import secrets
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from nemoguardian.billing import db
 from nemoguardian.billing.plans import Tier
+from nemoguardian.providers.ops import (
+    GpuOpsConfig,
+    ProvisionResult,
+    ProvisionStatus,
+    provision_guarded,
+)
+
+if TYPE_CHECKING:
+    from nemoguardian.providers.base import Offer
+    from nemoguardian.providers.ops import OpsEventLog, _Provisioner
 
 Provider = Literal["vastai", "digitalocean", "lambda", "on_prem"]
 
@@ -83,6 +93,118 @@ async def _run_job(job_id: int, provider: Provider, ssh_public_key: str | None) 
         db.update_provisioning_job(job_id, status="failed", error_message=str(exc))
 
 
+# --------------------------------------------------------------------------- #
+# Guarded provisioning (audit #45 hookup)                                      #
+# --------------------------------------------------------------------------- #
+#
+# The legacy ``provision_instance`` path above *simulates* a provider and is kept
+# for the demo. The guarded path below routes a real provision through
+# :func:`nemoguardian.providers.ops.provision_guarded` so spend caps
+# (max-price / max-hours) and the no-auto-spend confirm gate are enforced
+# **before any live spend**. Over-cap → ``rejected`` (no provider call); caps OK
+# but unconfirmed → ``planned`` (a dry-run, still no spend); confirmed + in-cap →
+# the provider is called and the job goes ``live``. Billing-ledger logic in
+# ``billing/db.py`` is untouched — this only gates the provisioning call.
+
+# Provision results that did not create a live instance map onto these job
+# statuses (the ``provisioning_jobs.status`` column is free-form TEXT).
+_GUARDED_JOB_STATUS: dict[ProvisionStatus, str] = {
+    ProvisionStatus.PROVISIONED: "live",
+    ProvisionStatus.PLANNED: "planned",
+    ProvisionStatus.REJECTED: "rejected",
+    ProvisionStatus.FAILED: "failed",
+}
+
+
+async def provision_instance_guarded(
+    *,
+    customer_id: int,
+    provider: Provider,
+    offer: Offer,
+    provider_client: _Provisioner,
+    reserve_hours: float,
+    confirm: bool = False,
+    ops_config: GpuOpsConfig | None = None,
+    ssh_public_key: str | None = None,
+    image: str = "nemoguardian/self-hosted:latest",
+    env: dict[str, str] | None = None,
+    event_log: OpsEventLog | None = None,
+) -> db.ProvisioningJob:
+    """Create + run a *guarded* provisioning job and return the job record.
+
+    Unlike :func:`provision_instance`, the provider call is gated by
+    :func:`provision_guarded`: the spend caps and the explicit-confirm guard run
+    before any money is spent. The job is run inline (the guard decision is cheap
+    and the returned job already reflects the outcome).
+    """
+    if provider not in SUPPORTED_PROVIDERS:
+        raise ValueError(f"unsupported provider {provider!r}")
+    job = db.create_provisioning_job(
+        customer_id=customer_id, tier=Tier.SELF_HOSTED, provider=provider
+    )
+    await _run_guarded_job(
+        job.id,
+        offer,
+        provider_client=provider_client,
+        reserve_hours=reserve_hours,
+        confirm=confirm,
+        ops_config=ops_config,
+        ssh_public_key=ssh_public_key,
+        image=image,
+        env=env,
+        event_log=event_log,
+    )
+    return db.get_provisioning_job(job.id)
+
+
+async def _run_guarded_job(
+    job_id: int,
+    offer: Offer,
+    *,
+    provider_client: _Provisioner,
+    reserve_hours: float,
+    confirm: bool = False,
+    ops_config: GpuOpsConfig | None = None,
+    ssh_public_key: str | None = None,
+    image: str = "nemoguardian/self-hosted:latest",
+    env: dict[str, str] | None = None,
+    event_log: OpsEventLog | None = None,
+) -> ProvisionResult:
+    """Run the guarded provision for ``job_id`` and reflect the result on the row.
+
+    Returns the :class:`ProvisionResult` so callers (and tests) can assert on the
+    cap decision directly. The provider is only ever called when the caps pass
+    *and* the request is confirmed — otherwise no spend happens.
+    """
+    config = ops_config or GpuOpsConfig.from_env()
+    db.update_provisioning_job(job_id, status="provisioning")
+    result = await provision_guarded(
+        provider_client,
+        offer,
+        config=config,
+        reserve_hours=reserve_hours,
+        confirm=confirm,
+        ssh_public_key=ssh_public_key,
+        image=image,
+        env=env,
+        event_log=event_log,
+    )
+    status = _GUARDED_JOB_STATUS.get(result.status, "failed")
+    if result.status is ProvisionStatus.PROVISIONED and result.instance is not None:
+        inst = result.instance
+        db.update_provisioning_job(
+            job_id,
+            status=status,
+            instance_id=inst.instance_id,
+            endpoint_url=inst.endpoint_url,
+            ssh_command=inst.ssh_command,
+        )
+    else:
+        # planned / rejected / failed → no live instance; record the reason.
+        db.update_provisioning_job(job_id, status=status, error_message=result.reason)
+    return result
+
+
 def _render_onprem_snippet(ssh_public_key: str | None) -> str:
     """A docker-compose snippet the user runs locally."""
     key_block = ssh_public_key or "<paste your SSH public key>"
@@ -98,4 +220,9 @@ def _render_onprem_snippet(ssh_public_key: str | None) -> str:
     )
 
 
-__all__ = ["SUPPORTED_PROVIDERS", "Provider", "provision_instance"]
+__all__ = [
+    "SUPPORTED_PROVIDERS",
+    "Provider",
+    "provision_instance",
+    "provision_instance_guarded",
+]
