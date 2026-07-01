@@ -65,6 +65,15 @@ class BotConfig:
                 workspace_id=str(workspace_id),
                 policy_preset="telegram",
             )
+        if platform_enum == Platform.MATRIX:
+            return cls(platform=platform_enum, workspace_id=str(workspace_id), policy_preset="matrix")
+        if platform_enum == Platform.REDDIT:
+            return cls(
+                platform=platform_enum,
+                workspace_id=str(workspace_id),
+                policy_preset="reddit",
+                public_warning=False,
+            )
         return cls(
             platform=platform_enum,
             workspace_id=str(workspace_id),

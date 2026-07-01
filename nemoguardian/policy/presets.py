@@ -98,12 +98,60 @@ TELEGRAM_DEFAULT: dict = {
 }
 
 
+MATRIX_DEFAULT: dict = {
+    "name": "matrix-default",
+    "description": "Room defaults — block PII, self-harm, and violent content.",
+    "rules": [
+        {
+            "id": "force-block-pii",
+            "when": {"categories_include": ["PII"]},
+            "then": {"final_label": "unsafe", "final_score": 1.0},
+        },
+        {
+            "id": "force-block-self-harm",
+            "when": {"categories_include": ["Suicide & Self-Harm"]},
+            "then": {"final_label": "unsafe", "final_score": 1.0},
+        },
+        {
+            "id": "force-block-violent",
+            "when": {"categories_include": ["Violent"]},
+            "then": {"final_label": "unsafe", "final_score": 1.0},
+        },
+    ],
+}
+
+
+REDDIT_DEFAULT: dict = {
+    "name": "reddit-default",
+    "description": "Subreddit moderator defaults — block PII, self-harm, and violent content.",
+    "rules": [
+        {
+            "id": "force-block-pii",
+            "when": {"categories_include": ["PII"]},
+            "then": {"final_label": "unsafe", "final_score": 1.0},
+        },
+        {
+            "id": "force-block-self-harm",
+            "when": {"categories_include": ["Suicide & Self-Harm"]},
+            "then": {"final_label": "unsafe", "final_score": 1.0},
+        },
+        {
+            "id": "force-block-violent",
+            "when": {"categories_include": ["Violent"]},
+            "then": {"final_label": "unsafe", "final_score": 1.0},
+        },
+    ],
+}
+
+
 PRESETS: dict[str, dict] = {
     "discord": DISCORD_DEFAULT,
     "twitch": TWITCH_CHAT,
     "generic": GENERIC_WEBHOOK,
     "slack": SLACK_DEFAULT,
     "telegram": TELEGRAM_DEFAULT,
+    "matrix": MATRIX_DEFAULT,
+    "reddit": REDDIT_DEFAULT,
 }
 
 
@@ -116,7 +164,9 @@ def get_preset(name: str) -> NemoclawPolicy:
 __all__ = [
     "DISCORD_DEFAULT",
     "GENERIC_WEBHOOK",
+    "MATRIX_DEFAULT",
     "PRESETS",
+    "REDDIT_DEFAULT",
     "SLACK_DEFAULT",
     "TELEGRAM_DEFAULT",
     "TWITCH_CHAT",

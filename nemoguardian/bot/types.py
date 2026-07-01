@@ -11,6 +11,8 @@ class Platform(str, Enum):
     WEBHOOK = "webhook"
     SLACK = "slack"
     TELEGRAM = "telegram"
+    MATRIX = "matrix"
+    REDDIT = "reddit"
 
 
 class ModerationAction(str, Enum):
