@@ -30,3 +30,12 @@ jobs:
 
       - name: Run verification
         run: make verify PYTHON=python
+
+      - name: Check documentation links
+        run: make link-check PYTHON=python
+
+      - name: Scan for secret-shaped tokens
+        run: make secret-scan PYTHON=python
+
+      - name: Validate package build metadata
+        run: make build-check PYTHON=python
