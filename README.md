@@ -210,6 +210,46 @@ For self-hosted Docker, a non-placeholder `NEMOGUARDIAN_API_KEY` also bootstraps
 a local self-hosted customer so `/v1/moderate` works on a fresh instance without
 manually seeding SQLite.
 
+## Agent self-guard (Hermes skill + MCP server)
+
+The same cascade that powers Discord, Twitch, and the HTTP API is also
+exposed to **any agent** — Hermes-driven or otherwise — so an agent can
+screen its own behavior before posting, sending, or acting on untrusted
+content. Two drop-in surfaces:
+
+**1. `nemoguardian guard` CLI verb** — one line, exit-code gate:
+
+```bash
+nemoguardian guard "$draft_reply" --mode standard \
+  && send "$draft_reply" \
+  || echo "blocked by nemoguardian"
+```
+
+Compact JSON to stdout, `0` = allowed, `1` = blocked. Branches on it
+exactly the way the Discord bot does on the cascade. This is the agent
+self-guard primitive.
+
+**2. Hermes Agent skill** — drop the `integrations/hermes-skill/nemoguardian`
+folder into `~/.hermes/skills/` and the agent gains a *reflex* skill: screen
+any outbound text or untrusted tool result through the cascade before acting.
+See `integrations/hermes-skill/nemoguardian/SKILL.md` for the instructions
+the agent loads.
+
+**3. MCP server** — `nemoguardian mcp` (stdio) exposes the cascade as
+`moderate_text(text, mode, policy)` and the self-hosted GPU-credit wallet
+as `gpu_credit_balance(customer_id)`. Works with any MCP-compatible
+client (Hermes, Claude, Codex, your own agent):
+
+```bash
+pip install -e ".[mcp]"
+nemoguardian mcp
+```
+
+**Why it matters:** most agent harm is an output or action problem —
+leaking PII, amplifying a scam, or obeying an instruction injected into
+a fetched page. A one-line self-guard before posting/acting closes those
+paths with a real, auditable moderation verdict instead of vibes.
+
 ## Platform coverage
 
 Support is added one adapter at a time and lands at different maturity levels.
@@ -446,6 +486,8 @@ nemoguardian/
 │       ├── matrix.py
 │       ├── reddit.py
 │       └── webhook.py
+├── integrations/
+│   └── hermes-skill/           ← drop-in Hermes Agent skill (SKILL.md)
 ├── tests/
 ├── docs/
 │   └── MODEL_CATALOG.md       ← full model survey (see docs/)

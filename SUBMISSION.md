@@ -91,6 +91,12 @@ trade-off that fits them. The demo UI (`/demo`) shows the cost comparison table 
 - Provider registry with 9 clouds; Vast.ai has live API client
 - Docker image + docker-compose for self-hosted
 - `/demo` moderation console with per-model verdicts, reasoning, latency, policy rule, and cost table
+- **Hermes Agent skill** at `integrations/hermes-skill/` — a drop-in
+  skill for any Hermes-driven agent to self-guard its own inputs and outputs
+  (backed by the `nemoguardian guard` CLI verb, exit-code gate)
+- **Model Context Protocol (MCP) server** at `nemoguardian mcp` —
+  exposes the cascade + GPU-credit balance as agent tools, works with any
+  MCP-compatible client (Hermes, Claude, Codex, your own agent)
 
 **Simulated for the demo:**
 - Other cloud providers return hard-coded catalog data so the cost table is honest
@@ -102,7 +108,10 @@ trade-off that fits them. The demo UI (`/demo`) shows the cost comparison table 
 - **NVIDIA integrations:** Nemotron-CSR 4B + Nemotron 3 Ultra triage + NemoClaw policy gate ✅
 - **Stripe Skills:** Subscription tiers, webhook handler, metered billing, customer portal ✅
 - **"Agents that earn, spend, and operate":** nemoguardian is itself an agent —
-  consumes API calls, gates LLM input/output, sold as managed service ✅
+  consumes API calls, gates LLM input/output, sold as managed service.
+  Ships with a Hermes Agent skill (`integrations/hermes-skill/`) and an
+  MCP server (`nemoguardian mcp`) so any agent — Hermes-driven or not — can
+  self-guard its own inputs and outputs through the cascade ✅
 - **Real operations at any scale:** FastAPI scales horizontally; same Docker image works on any GPU ✅
 
 ## Why this wins (or at least deserves to)
@@ -132,7 +141,6 @@ trade-off that fits them. The demo UI (`/demo`) shows the cost comparison table 
 
 - Small eval harness — 200 adversarial prompts in 4 languages with ground truth
 - Stripe test-mode checkout in the demo video (no live card needed)
-- Hermes Agent skill so any Hermes-driven agent can invoke nemoguardian as a guardrail
 - One-click Vast.ai launch flow wired to the live provisioning endpoint
 
 ## Self-critique
