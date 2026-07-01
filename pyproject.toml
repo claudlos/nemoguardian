@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nemoguardian"
-version = "0.1.0"
-description = "Multi-model LLM moderation cascade (Nemotron + Qwen3Guard). Hackathon project."
+version = "1.0.0"
+description = "Multi-model LLM moderation cascade (Nemotron + Qwen3Guard). Self-hostable template with adapters for Discord, Twitch, Slack, Telegram, Matrix, Reddit, and webhooks."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
@@ -62,6 +62,8 @@ nemoguardian = "nemoguardian.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/claudlos/nemoguardian"
+Releases = "https://github.com/claudlos/nemoguardian/releases"
+Issues = "https://github.com/claudlos/nemoguardian/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]

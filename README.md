@@ -1,15 +1,27 @@
 # nemoguardian
 
 [![CI](https://github.com/claudlos/nemoguardian/actions/workflows/ci.yml/badge.svg)](https://github.com/claudlos/nemoguardian/actions/workflows/ci.yml)
+[![Release v1.0](https://img.shields.io/badge/release-v1.0.0-blue)](https://github.com/claudlos/nemoguardian/releases/tag/v1.0.0)
+[![License Apache-2.0](https://img.shields.io/badge/license-Apache_2.0-green)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
 
 > **A self-hostable, multi-model LLM moderation template for communities and orgs.**
 > **Built on Nemotron Content Safety Reasoning + Qwen3Guard + optional Nemotron 3 Ultra triage**
 
-**Hermes Agent Accelerated Business Hackathon** · **NVIDIA × Stripe × Nous Research** 
+**Hermes Agent Accelerated Business Hackathon** · **NVIDIA × Stripe × Nous Research**
 
 ---
 
-![nemoguardian moderation cascade hero](docs/nemoguardian-hero.png)
+![nemoguardian moderation cascade hero](docs/nemoguardian-hero.jpg)
+
+## Reach for it when…
+
+- 🛡️ You run a **Discord / Twitch / Slack / Telegram** community and need moderation you own.
+- 🤖 You run an **AI agent** and want to gate its inputs/outputs through a real cascade (PII, scams, jailbreaks, prompt injection) — not vibes.
+- 💸 You want **vendor-agnostic infra**: one Docker image, commodity GPUs from $0.07/hr, 9 cloud providers, no managed-SaaS lock-in.
+- 🧾 You need an **auditable trail** (redacted, append-only, SHA-256 case-correlated) for compliance or post-incident review.
+
+If you'd rather pay Hive / OpenAI Moderation and not run anything, this isn't for you.
 
 ## Nemoguardian
 
@@ -278,21 +290,17 @@ moderator; Slack, Telegram, Matrix, and Reddit have offline-tested adapter
 skeletons ready for live-token smoke tests. Actions a platform can't perform
 degrade to `flag` for review rather than being silently dropped.
 
-## Quick Slack / Telegram / Twitch smoke
+## Live-token smoke (per platform)
 
-For submission polish, start with the offline umbrella smoke. It exercises the
-real adapter parsers, action mapping, audit writes, and capability degradation
-without live secrets or platform SDKs:
+After the offline umbrella smoke (which exercises every adapter's parser,
+action mapping, audit writes, and capability degradation without live
+secrets or SDKs), install the live extras for the platforms you want to
+validate:
 
 ```bash
-make platform-smoke
+make platform-smoke                         # offline umbrella
 make platform-smoke PLATFORM_SMOKE_FLAGS=--json
-```
-
-Then install the live extras for the platforms you want to validate:
-
-```bash
-pip install -e ".[slack,telegram,twitch]"
+pip install -e ".[slack,telegram,twitch]"   # add the live SDKs
 ```
 
 Slack live checklist:
@@ -329,7 +337,8 @@ doctor/readiness checks are green. The live-token strategy is documented in
 
 ## Real-model demo config
 
-The June 30 demo target is a Vast.ai RTX 3090 with 24GB VRAM:
+The recommended GPU host is a Vast.ai RTX 3090 with 24GB VRAM (cheapest
+host that fits the FP16 cascade):
 
 ```bash
 NEMOGUARDIAN_QUANTIZE=1
@@ -503,3 +512,10 @@ nemoguardian/
 Apache 2.0 for this repository's code. Model weights and hosted model APIs
 retain their own licenses and terms; see `docs/THIRD_PARTY_MODELS.md` and
 `docs/MODEL_CATALOG.md`.
+
+## Releases
+
+This is **v1.0.0**, the hackathon submission. See
+[`CHANGELOG.md`](CHANGELOG.md) for what shipped and follow the
+[release tags](https://github.com/claudlos/nemoguardian/releases) for
+follow-up work.

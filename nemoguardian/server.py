@@ -92,7 +92,7 @@ def get_policies() -> dict[str, NemoclawPolicy]:
 app = FastAPI(
     title="nemoguardian",
     description="Multi-model LLM moderation cascade (Nemotron + Qwen3Guard).",
-    version="0.1.0",
+    version="1.0.0",
 )
 
 # Production hardening: env-configurable CORS allowlist (no wildcard by
