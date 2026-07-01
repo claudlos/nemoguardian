@@ -97,7 +97,24 @@ app = FastAPI(
 # Production hardening: env-configurable CORS allowlist (no wildcard by
 # default), per-key/IP rate limiting, and a request body-size cap on the
 # moderation endpoints. See nemoguardian.middleware for the config knobs.
-install_hardening(app)
+def _rate_limit_key_validator(raw_key: str) -> bool:
+    """Return True only for a *real* API key, so random Bearer values can't mint
+    fresh rate-limit buckets (they fall back to trusted-IP keying).
+
+    Fail-safe: any error resolving the key is swallowed and treated as
+    unauthenticated — this runs on the moderation hot path and must never raise.
+    """
+    if not raw_key.startswith("nmg_"):
+        return False
+    try:
+        if billing_db.lookup_customer_by_api_key(raw_key) is not None:
+            return True
+        return billing_auth._lookup_env_bootstrap_customer(raw_key) is not None
+    except Exception:  # never break moderation on a lookup error
+        return False
+
+
+install_hardening(app, key_validator=_rate_limit_key_validator)
 
 
 @app.get("/health", response_model=HealthResponse)
