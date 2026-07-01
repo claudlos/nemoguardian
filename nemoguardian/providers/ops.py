@@ -485,14 +485,14 @@ async def watchdog(
             td = await teardown(
                 provider, instance_id, reason="max_reserve_hours", event_log=event_log
             )
-            return WatchdogResult(instance_id, "max_reserve_hours", True, checks, elapsed_h, td)
+            return WatchdogResult(instance_id, "max_reserve_hours", td.ok, checks, elapsed_h, td)
 
         # 2. Completion — destroy on completion.
         if is_complete is not None and is_complete():
             td = await teardown(
                 provider, instance_id, reason="completed", event_log=event_log
             )
-            return WatchdogResult(instance_id, "completed", True, checks, elapsed_h, td)
+            return WatchdogResult(instance_id, "completed", td.ok, checks, elapsed_h, td)
 
         # 3. Idle cap.
         if (
@@ -503,16 +503,25 @@ async def watchdog(
             td = await teardown(
                 provider, instance_id, reason="idle", event_log=event_log
             )
-            return WatchdogResult(instance_id, "idle", True, checks, elapsed_h, td)
+            return WatchdogResult(instance_id, "idle", td.ok, checks, elapsed_h, td)
 
-        # 4. Already gone? Nothing to tear down.
-        status = await _safe_status(provider, instance_id)
-        if status.state in _TERMINAL_STATES:
+        # 4. Already gone? Nothing to tear down. Transport/status API failures are
+        # not terminal proof; keep polling so a transient outage never leaves the
+        # watchdog stopped while the GPU keeps running.
+        try:
+            status = await provider.status(instance_id)
+        except Exception as exc:
             _emit(event_log, OpsEvent(
-                event="watchdog_terminated", instance_id=instance_id,
-                reason=f"provider state {status.state.value}",
+                event="watchdog_status_error", instance_id=instance_id,
+                reason=type(exc).__name__, details={"error": str(exc)},
             ))
-            return WatchdogResult(instance_id, "terminated", False, checks, elapsed_h, None)
+        else:
+            if status.state in _TERMINAL_STATES:
+                _emit(event_log, OpsEvent(
+                    event="watchdog_terminated", instance_id=instance_id,
+                    reason=f"provider state {status.state.value}",
+                ))
+                return WatchdogResult(instance_id, "terminated", False, checks, elapsed_h, None)
 
         await sleep(config.poll_interval_seconds)
 

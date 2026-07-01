@@ -6,6 +6,8 @@ is stubbed, so these tests need no GPU, network, or token.
 
 from __future__ import annotations
 
+import sys
+from types import ModuleType
 from typing import Any
 
 import pytest
@@ -193,14 +195,15 @@ def test_capabilities_are_honest():
     assert slack.capabilities() == {
         ModerationAction.ALLOW,
         ModerationAction.FLAG,
-        ModerationAction.DELETE,
         ModerationAction.NOTIFY_MODS,
         ModerationAction.NOTIFY_USER,
     }
 
 
 def test_slack_decision_degrades_unsupported_actions():
-    assert slack.slack_decision(ModerationAction.DELETE).degraded is False
+    delete_decision = slack.slack_decision(ModerationAction.DELETE)
+    assert delete_decision.degraded is True
+    assert delete_decision.action == ModerationAction.FLAG
     decision = slack.slack_decision(ModerationAction.TIMEOUT)
     assert decision.degraded is True
     assert decision.action == ModerationAction.FLAG
@@ -211,7 +214,7 @@ def test_slack_decision_degrades_unsupported_actions():
 # --- handler flow --------------------------------------------------------
 
 
-async def test_handler_deletes_unsafe_and_audits_redacted(tmp_path):
+async def test_handler_flags_unsafe_and_audits_redacted(tmp_path):
     config_store, audit_log = _stores(tmp_path)
     config = BotConfig.default(Platform.SLACK, "T1")
     config.log_channel_id = "C-mod"
@@ -228,13 +231,13 @@ async def test_handler_deletes_unsafe_and_audits_redacted(tmp_path):
         client=client,
     )
 
-    assert "chat_delete" in client.names()
-    assert client.kwargs_for("chat_delete") == {"channel": "C1", "ts": "1700000000.000100"}
+    assert "chat_delete" not in client.names()
     assert "chat_postMessage" in client.names()  # warning + mod-log
 
     record = audit_log.recent()[0]
-    assert record["action"] == "delete"
-    assert "delete" in record["execution_status"]
+    assert record["action"] == "flag"
+    assert record["execution_status"] == "warning+flag"
+    assert record["error"] is None
     assert "jane@example.com" not in record["text_excerpt"]
     assert "123-45-6789" not in record["text_excerpt"]
     assert "[email]" in record["text_excerpt"]
@@ -242,6 +245,29 @@ async def test_handler_deletes_unsafe_and_audits_redacted(tmp_path):
     # raw text never appears in any posted Slack message
     for _name, kwargs in client.calls:
         assert "jane@example.com" not in kwargs.get("text", "")
+
+
+async def test_handler_preserves_bolt_body_team_id_for_bare_events(tmp_path):
+    config_store, audit_log = _stores(tmp_path)
+    config = BotConfig.default(Platform.SLACK, "T-body")
+    config.log_channel_id = "C-mod"
+    config_store.save(config)
+    client = FakeSlackClient()
+    handler = slack.make_handler(
+        FakeCascade(VerdictLabel.UNSAFE, categories=["PII"]),
+        config_store=config_store,
+        audit_log=audit_log,
+    )
+
+    await handler(
+        _event("drop your SSN", team="T-body")["event"],
+        client=client,
+        body={"team_id": "T-body"},
+    )
+
+    record = audit_log.recent()[0]
+    assert record["workspace_id"] == "T-body"
+    assert "slack-T-body-" in record["case_id"]
 
 
 async def test_handler_skips_ignored_channel(tmp_path):
@@ -294,8 +320,8 @@ async def test_handler_async_client_is_awaited(tmp_path):
         audit_log=audit_log,
     )(_event("drop your SSN"), client=client)
 
-    assert "chat_delete" in client.names()
-    assert audit_log.recent()[0]["action"] == "delete"
+    assert "chat_delete" not in client.names()
+    assert audit_log.recent()[0]["action"] == "flag"
 
 
 # --- apply / degradation -------------------------------------------------
@@ -334,7 +360,7 @@ async def test_apply_allows_without_side_effects():
     assert client.calls == []
 
 
-async def test_apply_reports_partial_when_delete_fails():
+async def test_apply_delete_degrades_to_flag_without_calling_delete():
     config = BotConfig.default(Platform.SLACK, "T1")
     client = FakeSlackClient(fail={"chat_delete"})
     message, evaluation = _evaluation(
@@ -346,12 +372,14 @@ async def test_apply_reports_partial_when_delete_fails():
 
     status, error = await slack.apply_slack_actions(client, message, evaluation)
 
-    assert status == "partial"
-    assert error == "delete:RuntimeError"
+    assert status == "warning+flag"
+    assert error is None
+    assert evaluation.plan.action == ModerationAction.FLAG
+    assert "chat_delete" not in client.names()
     assert "chat_postMessage" in client.names()  # warning still posted
 
 
-async def test_apply_reports_failed_when_no_client():
+async def test_apply_delete_degrades_to_flag_without_client():
     config = BotConfig.default(Platform.SLACK, "T1")
     message, evaluation = _evaluation(
         config=config,
@@ -361,8 +389,9 @@ async def test_apply_reports_failed_when_no_client():
 
     status, error = await slack.apply_slack_actions(None, message, evaluation)
 
-    assert status == "failed"
-    assert error == "delete:no-client"
+    assert status == "flag"
+    assert error is None
+    assert evaluation.plan.action == ModerationAction.FLAG
 
 
 # --- adapter surface -----------------------------------------------------
@@ -403,8 +432,8 @@ async def test_adapter_handle_event_end_to_end(tmp_path):
 
     await adapter.handle_event(_event("drop your SSN"), client=client)
 
-    assert "chat_delete" in client.names()
-    assert audit_log.recent()[0]["action"] == "delete"
+    assert "chat_delete" not in client.names()
+    assert audit_log.recent()[0]["action"] == "flag"
 
 
 # --- doctor --------------------------------------------------------------
@@ -475,6 +504,41 @@ def test_run_bot_requires_token(monkeypatch):
 
 
 def test_import_nemoguardian_does_not_require_slack_bolt():
-    import sys
-
     assert "slack_bolt" not in sys.modules
+
+
+def test_build_app_passes_bolt_body_to_handler(monkeypatch):
+    slack_bolt_module = ModuleType("slack_bolt")
+    apps: list[Any] = []
+
+    class FakeApp:
+        def __init__(self, *, token: str | None, signing_secret: str | None) -> None:
+            self.token = token
+            self.signing_secret = signing_secret
+            self.listeners: dict[str, Any] = {}
+            apps.append(self)
+
+        def event(self, name: str):
+            def decorator(func):
+                self.listeners[name] = func
+                return func
+
+            return decorator
+
+    captured: list[dict[str, Any]] = []
+
+    async def fake_handler(event: Any, *, client: Any = None, body: Any = None) -> None:
+        captured.append({"event": event, "client": client, "body": body})
+
+    slack_bolt_module.App = FakeApp
+    monkeypatch.setitem(sys.modules, "slack_bolt", slack_bolt_module)
+    monkeypatch.setattr(slack, "make_handler", lambda **_kwargs: fake_handler)
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_SIGNING_SECRET", "signing-test")
+
+    app = slack.build_app()
+    event = _event("hi", team="T-live")["event"]
+    body = {"team_id": "T-live", "event": event}
+    app.listeners["message"](event, object(), body)
+
+    assert captured == [{"event": event, "client": captured[0]["client"], "body": body}]

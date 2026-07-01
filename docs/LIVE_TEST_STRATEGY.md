@@ -118,10 +118,10 @@ needs, and the safest way to run. Secrets come **only** from the environment
   (required); `SLACK_APP_TOKEN` (`xapp-…`) if you use Socket Mode.
 * **OAuth scopes:** `channels:history` / `groups:history` (read messages),
   `chat:write` (warnings + mod-log), `chat:write.customize` (optional),
-  `reactions:write` (flag controversial), and `chat:delete` requires
-  admin-level delete — note Slack apps can only delete **their own** messages
-  with `chat:delete`; deleting user messages needs a workspace-admin token, so
-  the adapter degrades unsupported deletes to `flag` (see `slack_decision`).
+  and `reactions:write` (flag controversial). User-message deletion is not
+  advertised by the default bot-token setup: deleting user messages requires
+  elevated workspace-admin capability, so delete requests degrade to `flag`
+  (see `slack_decision`).
 * **Run safely:** create a test workspace, install the app via OAuth, prefer
   **Socket Mode** (no public URL). Build the app with
   [`nemoguardian.adapters.slack.build_app`](../nemoguardian/adapters/slack.py)

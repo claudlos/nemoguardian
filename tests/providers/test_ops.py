@@ -45,11 +45,13 @@ class FakeProvider:
         states: list[InstanceState] | None = None,
         provision_error: Exception | None = None,
         status_error: Exception | None = None,
+        destroy_error: Exception | None = None,
     ) -> None:
         self._states = states or [InstanceState.LIVE]
         self._idx = 0
         self.provision_error = provision_error
         self.status_error = status_error
+        self.destroy_error = destroy_error
         self.provision_calls: list[dict[str, Any]] = []
         self.destroy_calls: list[str] = []
         self.status_calls: list[str] = []
@@ -85,6 +87,8 @@ class FakeProvider:
 
     async def destroy(self, instance_id: str) -> None:
         self.destroy_calls.append(instance_id)
+        if self.destroy_error:
+            raise self.destroy_error
 
 
 class FakeClock:
@@ -271,6 +275,23 @@ async def test_watchdog_tears_down_after_max_reserve_hours():
     assert len(waits) == 1  # slept once before the cap tripped
 
 
+async def test_watchdog_reports_failed_teardown_without_claiming_success():
+    cfg = ops.GpuOpsConfig(max_reserve_hours=1.0, max_idle_seconds=None, poll_interval_seconds=5)
+    provider = FakeProvider(states=[InstanceState.LIVE], destroy_error=RuntimeError("destroy down"))
+    _waits, sleep = _no_sleep_factory()
+
+    result = await ops.watchdog(
+        provider, "inst-7", config=cfg, started_at=0.0,
+        now_fn=FakeClock([4000.0]), sleep=sleep,
+    )
+
+    assert result.reason == "max_reserve_hours"
+    assert result.torn_down is False
+    assert result.teardown is not None
+    assert result.teardown.ok is False
+    assert provider.destroy_calls == ["inst-7"]
+
+
 async def test_watchdog_tears_down_on_idle():
     cfg = ops.GpuOpsConfig(max_reserve_hours=100, max_idle_seconds=60, poll_interval_seconds=5)
     provider = FakeProvider(states=[InstanceState.LIVE])
@@ -308,6 +329,30 @@ async def test_watchdog_stops_without_teardown_when_already_terminal():
     assert result.reason == "terminated"
     assert result.torn_down is False
     assert provider.destroy_calls == []
+
+
+async def test_watchdog_keeps_polling_after_transient_status_error():
+    cfg = ops.GpuOpsConfig(max_reserve_hours=100, max_idle_seconds=None, poll_interval_seconds=5)
+
+    class FlakyStatusProvider(FakeProvider):
+        async def status(self, instance_id: str) -> InstanceStatus:
+            self.status_calls.append(instance_id)
+            if len(self.status_calls) == 1:
+                raise RuntimeError("provider temporarily unavailable")
+            return InstanceStatus(instance_id=instance_id, state=InstanceState.DESTROYED)
+
+    provider = FlakyStatusProvider()
+    waits, sleep = _no_sleep_factory()
+    result = await ops.watchdog(
+        provider, "inst-7", config=cfg, started_at=0.0,
+        now_fn=FakeClock([0.0, 1.0, 2.0]), sleep=sleep,
+    )
+
+    assert result.reason == "terminated"
+    assert result.torn_down is False
+    assert provider.destroy_calls == []
+    assert len(provider.status_calls) == 2
+    assert waits == [5]
 
 
 # --------------------------------------------------------------------------- #

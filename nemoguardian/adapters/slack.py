@@ -79,14 +79,14 @@ _SKIP_SUBTYPES: frozenset[str] = frozenset(
     }
 )
 
-#: Normalized actions the Slack adapter can actually carry out. Slack realistically
-#: supports deleting a message and posting notices; it has no per-channel
-#: timeout/ban/mute, so those degrade to ``flag``.
+#: Normalized actions this Slack bot can reliably carry out with its documented
+#: bot-token setup. Slack user-message deletion requires elevated/admin install
+#: capabilities beyond the default app scopes, so delete/timeout/ban/mute all
+#: degrade to ``flag`` rather than failing live after being advertised.
 SLACK_CAPABILITIES: frozenset[ModerationAction] = frozenset(
     {
         ModerationAction.ALLOW,
         ModerationAction.FLAG,
-        ModerationAction.DELETE,
         ModerationAction.NOTIFY_MODS,
         ModerationAction.NOTIFY_USER,
     }
@@ -111,7 +111,7 @@ class SlackMessage:
     thread_ts: str | None = None
 
 
-def parse_slack_event(payload: Any) -> SlackMessage | None:
+def parse_slack_event(payload: Any, *, team_id: str | None = None) -> SlackMessage | None:
     """Parse a Slack ``message`` event into a :class:`SlackMessage`.
 
     Accepts both the full Events API envelope
@@ -136,9 +136,9 @@ def parse_slack_event(payload: Any) -> SlackMessage | None:
     ts = inner.get("ts")
     if not user_id or not channel_id or not ts:
         return None
-    team_id = payload.get("team_id") or inner.get("team") or payload.get("team") or "unknown"
+    resolved_team_id = team_id or payload.get("team_id") or inner.get("team") or payload.get("team") or "unknown"
     return SlackMessage(
-        team_id=str(team_id),
+        team_id=str(resolved_team_id),
         channel_id=str(channel_id),
         user_id=str(user_id),
         text=inner.get("text") or "",
@@ -179,8 +179,9 @@ def make_handler(
         review_service=review_service,
     )
 
-    async def on_message(event: Any, *, client: Any = None) -> None:
-        message = parse_slack_event(event)
+    async def on_message(event: Any, *, client: Any = None, body: Any = None) -> None:
+        body_team_id = body.get("team_id") if isinstance(body, dict) else None
+        message = parse_slack_event(event, team_id=str(body_team_id) if body_team_id else None)
         if message is None:
             return
         config = engine.config_for(message.team_id)
@@ -381,8 +382,8 @@ def build_app(
     )
 
     @app.event("message")
-    def _on_message(event, client) -> None:  # pragma: no cover - requires slack_bolt
-        asyncio.run(handler(event, client=client))
+    def _on_message(event, client, body) -> None:  # pragma: no cover - requires slack_bolt
+        asyncio.run(handler(event, client=client, body=body))
 
     return app
 

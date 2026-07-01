@@ -217,7 +217,7 @@ Columns: **ingest** (receive/parse platform events) · **actions enforced**
 |---|---|---|---|---|---|---|
 | **Discord** | yes | yes (delete, timeout, notify) | yes | yes | yes | **Full bot** |
 | **Twitch** | yes | no (evaluate + flag only) | yes | yes | yes | **Evaluate + flag** |
-| **Slack** | yes (event parsing) | mapped, no live admin surface yet | yes | yes | yes | **Adapter skeleton** |
+| **Slack** | yes (event parsing) | mapped notifications; deletes degrade to flag | yes | yes | yes | **Adapter skeleton** |
 | **Telegram** | yes (event parsing) | mapped, no live admin surface yet | yes | yes | yes | **Adapter skeleton** |
 | **Webhook** | yes | no — forwards verdict (verdict-only default) | yes | n/a | downstream | **Forward** |
 | Matrix / Reddit / YouTube / Kick / Slack slash-commands | — | — | — | — | — | Planned |
