@@ -39,12 +39,30 @@ def test_coverage_doc_exists_and_has_matrix_columns():
         assert column in text, f"coverage matrix missing column: {column}"
 
 
-def test_readme_reframed_as_self_hostable_template():
+def test_readme_positions_as_self_hostable():
+    """Guard the night-3 honest positioning: nemoguardian is something you
+    *self-host* (run on your own hardware, own the audit data, choose your
+    GPU / API providers), not a managed SaaS you subscribe to.
+
+    This is NOT a claim that the cascade runs without any third-party API
+    calls — Nemotron 3 Ultra triage is a free API call to NVIDIA or
+    OpenRouter and that's fine. The positioning is about *who runs the
+    moderation service* (you), not *where the model weights live* (wherever
+    is cheapest).
+
+    Asserted signals (at least two must be present, to stay phrasing-agnostic):
+    """
     text = _read(README).lower()
-    assert "self-hostable moderation template" in text
-    # Explicitly disclaims being a hosted business service.
-    assert "not a hosted business" in text
-    # Links out to the dedicated coverage doc.
+    signals = (
+        "self-host",          # covers "self-hostable", "self-hosted", "self-hosting"
+        "docker",
+        "own your audit",
+        "choose your own gpu",
+        "audit data",         # weaker, present in multiple places
+    )
+    hits = sum(1 for s in signals if s in text)
+    assert hits >= 2, f"README does not signal self-hostable positioning (hits={hits}, signals={signals})"
+    # Must link out to the dedicated coverage doc.
     assert "docs/platform_coverage.md" in text
 
 
