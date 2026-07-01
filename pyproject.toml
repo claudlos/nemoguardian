@@ -43,6 +43,8 @@ dependencies = [
 [project.optional-dependencies]
 discord = ["discord.py>=2.3"]
 twitch = ["twitchio>=2.10"]
+slack = ["slack-bolt>=1.18"]
+telegram = ["python-telegram-bot>=20"]
 mcp = ["mcp>=1.2"]
 dev = [
   "pytest>=8.0",

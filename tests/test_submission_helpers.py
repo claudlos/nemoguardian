@@ -252,7 +252,7 @@ def test_framework_smoke_writes_adapter_evidence(monkeypatch, tmp_path):
         "discord_unsafe_delete",
         "discord_controversial_reaction",
         "discord_bot_ignored",
-        "twitch_delete_action",
+        "twitch_flag_action",
         "webhook_auth_header",
         "webhook_forward_payload",
     }

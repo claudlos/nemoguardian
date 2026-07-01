@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/claudlos/nemoguardian/actions/workflows/ci.yml/badge.svg)](https://github.com/claudlos/nemoguardian/actions/workflows/ci.yml)
 
-> **Multi-model LLM moderation, plug-and-play.**
+> **A self-hostable, multi-model LLM moderation template for communities and orgs.**
 > **Built on Nemotron Content Safety Reasoning + Qwen3Guard + optional Nemotron 3 Ultra triage**
 
 **Hermes Agent Accelerated Business Hackathon** · **NVIDIA × Stripe × Nous Research** 
@@ -11,15 +11,32 @@
 
 ## Nemoguardian
 
-A small FastAPI service and moderation-bot foundation that classifies text as
-**safe / controversial / unsafe** by cascading two to three open-source models
-in series. Designed for:
+**nemoguardian is a self-hostable moderation template, not a hosted business
+service.** Clone it, point it at your own Discord / Twitch / webhook surfaces,
+choose your own GPU and API providers, and own your audit data. It is designed
+to run affordably on rented commodity GPUs only when your moderation volume
+warrants it.
 
-- Discord moderation bots with slash-command setup, mod logs, and audit records
-- Future Telegram / Slack bots on the same adapter foundation
-- Twitch / Kick live-chat moderation (streaming mode)
-- Generic webhook moderation for any social platform
-- LLM input/output guardrails (filter a prompt before it hits your chat model)
+At its core is a small FastAPI service and moderation-bot foundation that
+classifies text as **safe / controversial / unsafe** by cascading two to three
+open-source models in series. Use it for:
+
+- **Discord moderation** — the one full bot today: slash-command setup, mod logs,
+  dry-run, and append-only audit records.
+- **Twitch live-chat moderation** — per-message verdicts with planned actions
+  (enforcement wiring is partial).
+- **Generic webhook moderation** — compute a verdict and forward it to any
+  downstream platform (verdict-only by default).
+- **Slack / Telegram** — adapter skeletons today: event parsing, action mapping,
+  dry-run, and audit are in place, but there is no turnkey live admin surface yet.
+- **LLM input/output guardrails** — filter a prompt before it hits your chat model.
+
+Coverage differs per platform and is growing — see the
+[platform coverage matrix](#platform-coverage) below and
+[`docs/PLATFORM_COVERAGE.md`](docs/PLATFORM_COVERAGE.md) for an honest,
+code-grounded breakdown. This is a template you self-host: only Discord is a full
+bot today, and **you are responsible for your own GPU spend** (set budgets and
+tear rented boxes down after a run).
 
 The architecture:
 
@@ -183,6 +200,33 @@ default; enable it only for controlled local or recording hosts with
 For self-hosted Docker, a non-placeholder `NEMOGUARDIAN_API_KEY` also bootstraps
 a local self-hosted customer so `/v1/moderate` works on a fresh instance without
 manually seeding SQLite.
+
+## Platform coverage
+
+Support is added one adapter at a time and lands at different maturity levels.
+The matrix below is what the code does **today** — see
+[`docs/PLATFORM_COVERAGE.md`](docs/PLATFORM_COVERAGE.md) for the full breakdown,
+per-platform capabilities, and caveats.
+
+Columns: **ingest** (receive/parse platform events) · **actions enforced**
+(carry out moderation on the platform) · **doctor** (readiness check) ·
+**dry-run** (decide but don't act) · **audit** (append-only redacted record) ·
+**status**.
+
+| Platform | ingest | actions enforced | doctor | dry-run | audit | status |
+|---|---|---|---|---|---|---|
+| **Discord** | yes | yes (delete, timeout, notify) | yes | yes | yes | **Full bot** |
+| **Twitch** | yes | no (evaluate + flag only) | yes | yes | yes | **Evaluate + flag** |
+| **Slack** | yes (event parsing) | mapped, no live admin surface yet | yes | yes | yes | **Adapter skeleton** |
+| **Telegram** | yes (event parsing) | mapped, no live admin surface yet | yes | yes | yes | **Adapter skeleton** |
+| **Webhook** | yes | no — forwards verdict (verdict-only default) | yes | n/a | downstream | **Forward** |
+| Matrix / Reddit / YouTube / Kick / Slack slash-commands | — | — | — | — | — | Planned |
+
+Honest framing: this is a **self-hosted template**, not a complete multi-platform
+service. Only **Discord** is a full bot today; the others range from
+evaluate-and-plan (Twitch) to forward-only (webhook) to event-parsing skeletons
+(Slack, Telegram). Actions a platform can't perform degrade to `flag` for review
+rather than being silently dropped.
 
 ## Real-model demo config
 

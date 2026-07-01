@@ -14,8 +14,34 @@ import os
 import sys
 from collections.abc import Callable
 
-from nemoguardian.bot import AuditLog, ConfigStore, ModerationContext, ModerationEngine, Platform
+from nemoguardian.adapters.base import ActionDecision, degrade_action
+from nemoguardian.bot import (
+    AuditLog,
+    BotConfig,
+    ConfigStore,
+    ModerationContext,
+    ModerationEngine,
+    ModerationEvaluation,
+    Platform,
+)
+from nemoguardian.bot.types import ModerationAction
 from nemoguardian.cascade import Cascade, CascadeConfig
+from nemoguardian.review.service import ReviewService
+
+#: Normalized actions this Twitch chat flow actually carries out today. The live
+#: adapter evaluates and flags for review/audit, but it does not yet call Twitch
+#: moderation APIs with enough message/channel context to delete, timeout, or ban.
+TWITCH_CAPABILITIES: frozenset[ModerationAction] = frozenset(
+    {
+        ModerationAction.ALLOW,
+        ModerationAction.FLAG,
+    }
+)
+
+
+def capabilities() -> set[ModerationAction]:
+    """Return the normalized actions the Twitch adapter can carry out."""
+    return set(TWITCH_CAPABILITIES)
 
 
 def make_moderator(
@@ -23,16 +49,20 @@ def make_moderator(
     *,
     config_store: ConfigStore | None = None,
     audit_log: AuditLog | None = None,
+    review_service: ReviewService | None = None,
     channel_id: str = "twitch",
     emit: Callable[[str], None] = print,
+    engine: ModerationEngine | None = None,
 ):
-    cascade = cascade or Cascade(CascadeConfig.from_env())
-    engine = ModerationEngine(
-        Platform.TWITCH,
-        cascade=cascade,
-        config_store=config_store,
-        audit_log=audit_log,
-    )
+    if engine is None:
+        cascade = cascade or Cascade(CascadeConfig.from_env())
+        engine = ModerationEngine(
+            Platform.TWITCH,
+            cascade=cascade,
+            config_store=config_store,
+            audit_log=audit_log,
+            review_service=review_service,
+        )
 
     async def moderate(text: str, *, user_id: str = "unknown", username: str = "unknown") -> str:
         config = engine.config_for(channel_id)
@@ -48,7 +78,11 @@ def make_moderator(
         evaluation = await asyncio.to_thread(engine.evaluate, context, config)
         action = evaluation.plan.action.value
         if evaluation.result is not None:
-            engine.record(evaluation, execution_status=action)
+            decision = degrade_action(evaluation.plan.action, capabilities(), Platform.TWITCH)
+            if decision.degraded:
+                evaluation.plan.action = decision.action
+            action = evaluation.plan.action.value
+            engine.record(evaluation, execution_status=action, error=decision.reason)
             emit(
                 f"[twitch] {action}: {text[:60]} "
                 f"({evaluation.result.verdict.value}, score={evaluation.result.score})"
@@ -60,6 +94,88 @@ def make_moderator(
     return moderate
 
 
+class TwitchAdapter:
+    """Thin :class:`~nemoguardian.adapters.base.PlatformAdapter` over Twitch chat.
+
+    Wraps :func:`make_moderator` so behavior is unchanged while exposing the
+    normalized interface. Twitch enforcement happens inside ``handle_event``
+    (decide + record + emit); :meth:`apply_action` surfaces the
+    capability-degraded decision for a planned action.
+    """
+
+    platform = Platform.TWITCH
+
+    def __init__(
+        self,
+        cascade: Cascade | None = None,
+        *,
+        config_store: ConfigStore | None = None,
+        audit_log: AuditLog | None = None,
+        review_service: ReviewService | None = None,
+        channel_id: str = "twitch",
+        emit: Callable[[str], None] = print,
+    ) -> None:
+        self.channel_id = channel_id
+        self.engine = ModerationEngine(
+            Platform.TWITCH,
+            cascade=cascade,
+            config_store=config_store,
+            audit_log=audit_log,
+            review_service=review_service,
+        )
+        self._moderate = make_moderator(channel_id=channel_id, emit=emit, engine=self.engine)
+
+    def capabilities(self) -> set[ModerationAction]:
+        return capabilities()
+
+    def doctor(self, workspace_id: str | None = None) -> dict[str, object]:
+        """Return a lightweight readiness snapshot (never raises)."""
+        workspace = str(workspace_id) if workspace_id is not None else self.channel_id
+        config = self.engine.config_for(workspace)
+        token_configured = bool(os.environ.get("TWITCH_TOKEN"))
+        issues: list[str] = []
+        if not config.enabled:
+            issues.append("moderation is disabled")
+        if not token_configured:
+            issues.append("TWITCH_TOKEN is not set")
+        return {
+            "platform": Platform.TWITCH.value,
+            "workspace_id": workspace,
+            "enabled": config.enabled,
+            "token_configured": token_configured,
+            "readiness": "ready" if not issues else "needs attention",
+            "issues": issues,
+        }
+
+    def configure(self, workspace_id: str | None = None, **changes: object) -> BotConfig:
+        workspace = str(workspace_id) if workspace_id is not None else self.channel_id
+        if changes:
+            return self.engine.config_store.update(Platform.TWITCH, workspace, **changes)
+        return self.engine.config_for(workspace)
+
+    async def handle_event(
+        self,
+        text: str,
+        *,
+        user_id: str = "unknown",
+        username: str = "unknown",
+    ) -> str:
+        return await self._moderate(text, user_id=user_id, username=username)
+
+    def apply_action(self, evaluation: ModerationEvaluation) -> ActionDecision:
+        """Resolve the planned action against Twitch capabilities."""
+        return degrade_action(evaluation.plan.action, self.capabilities(), Platform.TWITCH)
+
+    def record_audit(
+        self,
+        evaluation: ModerationEvaluation,
+        *,
+        execution_status: str,
+        error: str | None = None,
+    ) -> None:
+        self.engine.record(evaluation, execution_status=execution_status, error=error)
+
+
 def run_bot(channel: str) -> None:
     token = os.environ.get("TWITCH_TOKEN")
     if not token:
@@ -68,7 +184,7 @@ def run_bot(channel: str) -> None:
     from twitchio.ext import commands
 
     bot = commands.Bot(token=token, prefix="!", initial_channels=[channel])
-    moderate = make_moderator()
+    moderate = make_moderator(channel_id=channel, review_service=ReviewService())
 
     @bot.event
     async def event_message(message) -> None:
@@ -90,4 +206,10 @@ if __name__ == "__main__":
     run_bot(sys.argv[1])
 
 
-__all__ = ["make_moderator", "run_bot"]
+__all__ = [
+    "TWITCH_CAPABILITIES",
+    "TwitchAdapter",
+    "capabilities",
+    "make_moderator",
+    "run_bot",
+]

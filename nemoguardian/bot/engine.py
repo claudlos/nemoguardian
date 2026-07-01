@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from nemoguardian.bot.audit import AuditLog, AuditRecord, redacted_excerpt, text_hash
 from nemoguardian.bot.config import BotConfig, ConfigStore
@@ -10,6 +11,13 @@ from nemoguardian.bot.types import ModerationAction, Platform
 from nemoguardian.cascade import Cascade, CascadeConfig
 from nemoguardian.policy.presets import get_preset
 from nemoguardian.schemas import ModerateRequest, ModerateResponse, VerdictLabel
+
+if TYPE_CHECKING:
+    from nemoguardian.review.models import ReviewCase
+    from nemoguardian.review.service import ReviewService
+
+# Plan actions that should land a case in the human-review queue.
+_REVIEW_ACTIONS = frozenset({ModerationAction.FLAG, ModerationAction.QUEUE})
 
 
 @dataclass
@@ -55,11 +63,16 @@ class ModerationEngine:
         cascade: Cascade | None = None,
         config_store: ConfigStore | None = None,
         audit_log: AuditLog | None = None,
+        review_service: ReviewService | None = None,
     ) -> None:
         self.platform = Platform(platform)
         self.cascade = cascade or Cascade(CascadeConfig.from_env())
         self.config_store = config_store or ConfigStore()
         self.audit_log = audit_log or AuditLog()
+        # Opt-in: only enqueue cases for human review when a ReviewService is
+        # injected. Left as None (the default) the engine behaves exactly as
+        # before — no extra writes, fully backward-compatible.
+        self.review_service = review_service
 
     def config_for(self, workspace_id: str) -> BotConfig:
         return self.config_store.get(self.platform, workspace_id)
@@ -113,6 +126,49 @@ class ModerationEngine:
             details={"permalink": evaluation.context.permalink, "text_redacted": True},
         )
         self.audit_log.append(record)
+        self.enqueue_review(evaluation)
+
+    def enqueue_review(self, evaluation: ModerationEvaluation) -> ReviewCase | None:
+        """Enqueue a controversial / flagged case for human review (audit #26).
+
+        No-op unless a :class:`~nemoguardian.review.service.ReviewService` is wired
+        in *and* the workspace config opts in (``review_queue``). Only cases that
+        actually need a human — a CONTROVERSIAL verdict or a FLAG/QUEUE action —
+        are enqueued; safe and clear-unsafe verdicts (auto-actioned) are not.
+
+        The raw message is handed to the review store, which redacts it into an
+        excerpt + hash — raw text is never persisted here. Fail-safe: any error is
+        swallowed so review bookkeeping can never break the moderation path. The
+        review case id mirrors the audit ``case_id`` so re-recording is idempotent.
+        """
+        service = self.review_service
+        if service is None:
+            return None
+        if not getattr(evaluation.config, "review_queue", False):
+            return None
+        if not needs_review(evaluation):
+            return None
+        cid = case_id(evaluation.context)
+        try:
+            return service.enqueue(
+                platform=evaluation.context.platform,
+                workspace_id=evaluation.context.workspace_id,
+                user_id=evaluation.context.user_id,
+                username=evaluation.context.username,
+                channel_id=evaluation.context.channel_id,
+                message_id=evaluation.context.message_id,
+                text=evaluation.context.text,  # redacted inside enqueue; raw never stored
+                case_id=cid,
+                verdict=evaluation.result.verdict if evaluation.result else None,
+                score=evaluation.result.score if evaluation.result else 0.0,
+                reason=evaluation.plan.reason,
+                categories=list(evaluation.result.categories) if evaluation.result else [],
+                action=evaluation.plan.action,
+                source_case_id=cid,
+            )
+        except Exception:
+            # Review enqueue is best-effort; never let it break moderation.
+            return None
 
     @staticmethod
     def _skip_reason(context: ModerationContext, config: BotConfig) -> str | None:
@@ -154,11 +210,26 @@ def case_id(context: ModerationContext) -> str:
     return f"{context.platform.value}-{context.workspace_id}-{context.message_id}"
 
 
+def needs_review(evaluation: ModerationEvaluation) -> bool:
+    """Whether an evaluation should be surfaced to a human moderator.
+
+    True for a CONTROVERSIAL verdict (the cascade was unsure) or any plan that
+    flags / queues the message for review. Safe verdicts (ALLOW) and clear-unsafe
+    verdicts (auto DELETE/TIMEOUT) do not need a human and return False.
+    """
+    if evaluation.result is None:
+        return False
+    if evaluation.result.verdict == VerdictLabel.CONTROVERSIAL:
+        return True
+    return evaluation.plan.action in _REVIEW_ACTIONS
+
+
 __all__ = [
     "ModerationContext",
     "ModerationEngine",
     "ModerationEvaluation",
     "ModerationPlan",
     "case_id",
+    "needs_review",
     "plan_for_result",
 ]

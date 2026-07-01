@@ -23,6 +23,7 @@ from nemoguardian.bot import (
     since_hours_ago,
 )
 from nemoguardian.bot.audit import text_hash
+from nemoguardian.review import ReviewService
 from nemoguardian.schemas import Mode, ModerateResponse, VerdictLabel
 
 
@@ -1456,7 +1457,13 @@ async def test_discord_build_bot_registers_and_runs_admin_commands(monkeypatch, 
 
     monkeypatch.setattr(discord, "ConfigStore", lambda: config_store)
     monkeypatch.setattr(discord, "AuditLog", lambda: audit_log)
-    monkeypatch.setattr(discord, "make_handler", lambda *args, **kwargs: fake_handler)
+    handler_kwargs: list[dict[str, Any]] = []
+
+    def fake_make_handler(*args, **kwargs):
+        handler_kwargs.append(kwargs)
+        return fake_handler
+
+    monkeypatch.setattr(discord, "make_handler", fake_make_handler)
     monkeypatch.setattr(discord, "ModerationEngine", FakeModerationEngine)
     monkeypatch.setenv("DISCORD_GUILD_ID", "123")
 
@@ -1466,6 +1473,7 @@ async def test_discord_build_bot_registers_and_runs_admin_commands(monkeypatch, 
     await bot.setup_hook()
     await bot.events["on_ready"]()
     await bot.events["on_message"](FakeDiscordMessage("hello"))
+    assert isinstance(handler_kwargs[0]["review_service"], ReviewService)
     group = bot.tree.group
     assert group is not None
 
@@ -1593,7 +1601,7 @@ def test_discord_module_main_starts_fake_bot(monkeypatch):
     assert namespace["__name__"] == "__main__"
 
 
-async def test_twitch_adapter_returns_delete_action(tmp_path):
+async def test_twitch_adapter_degrades_unsafe_to_flag(tmp_path):
     config_store, audit_log = _stores(tmp_path)
     cascade = FakeCascade(VerdictLabel.UNSAFE)
     emitted: list[str] = []
@@ -1605,10 +1613,13 @@ async def test_twitch_adapter_returns_delete_action(tmp_path):
         emit=emitted.append,
     )("drop your SSN")
 
-    assert action == "delete"
+    assert action == "flag"
     assert emitted
     assert cascade.calls[0]["mode"] == "fast"
-    assert audit_log.recent()[0]["platform"] == "twitch"
+    record = audit_log.recent()[0]
+    assert record["platform"] == "twitch"
+    assert record["action"] == "flag"
+    assert record["error"] == "delete unsupported on twitch -> degraded to flag"
 
 
 async def test_twitch_adapter_emits_skipped_message_without_audit(tmp_path):
@@ -1647,13 +1658,18 @@ def test_twitch_run_bot_registers_event_and_ignores_echo(monkeypatch):
     ]
     bots = _install_fake_twitch(monkeypatch, messages)
     calls: list[dict[str, str]] = []
+    make_kwargs: list[dict[str, Any]] = []
 
     async def fake_moderate(text: str, *, user_id: str, username: str) -> str:
         calls.append({"text": text, "user_id": user_id, "username": username})
         return "delete"
 
     monkeypatch.setenv("TWITCH_TOKEN", "twitch-test-token")
-    monkeypatch.setattr(twitch, "make_moderator", lambda: fake_moderate)
+    monkeypatch.setattr(
+        twitch,
+        "make_moderator",
+        lambda **kwargs: make_kwargs.append(kwargs) or fake_moderate,
+    )
 
     twitch.run_bot("nemoguardian")
 
@@ -1661,6 +1677,8 @@ def test_twitch_run_bot_registers_event_and_ignores_echo(monkeypatch):
     assert bots[0].prefix == "!"
     assert bots[0].initial_channels == ["nemoguardian"]
     assert bots[0].run_called is True
+    assert make_kwargs[0]["channel_id"] == "nemoguardian"
+    assert isinstance(make_kwargs[0]["review_service"], ReviewService)
     assert calls == [{"text": "drop your SSN", "user_id": "7", "username": "viewer"}]
 
 
@@ -1724,7 +1742,12 @@ async def test_webhook_adapter_sends_env_api_key(monkeypatch):
     assert verdict["verdict"] == "unsafe"
     assert client.posts[0]["headers"] == {"Authorization": "Bearer nmg_env_key"}
     assert client.posts[0]["params"] == {"policy_preset": "discord"}
-    assert client.posts[1]["json"] == {"text": "drop your SSN", "verdict": verdict}
+    # Default mode is verdict_only: the raw text must never be forwarded.
+    forwarded = client.posts[1]["json"]
+    assert forwarded["verdict"] == verdict
+    assert forwarded["forward_text"] == "verdict_only"
+    assert "text" not in forwarded
+    assert forwarded["text_sha256"] == webhook.text_hash("drop your SSN")
 
 
 async def test_webhook_adapter_uses_default_http_clients_and_explicit_api_key(monkeypatch):
@@ -1773,10 +1796,104 @@ async def test_webhook_adapter_uses_default_http_clients_and_explicit_api_key(mo
     assert clients[1].posts == [
         {
             "url": "http://forward.test/hook",
-            "json": {"text": "hello", "verdict": verdict},
+            "json": {
+                "verdict": verdict,
+                "forward_text": "verdict_only",
+                "text_sha256": webhook.text_hash("hello"),
+            },
         }
     ]
     assert webhook._auth_headers("   ") == {}
+
+
+_PII_TEXT = "Reach me at jane.doe@example.com or SSN 123-45-6789 now."
+
+
+async def test_webhook_verdict_only_never_forwards_raw_text(monkeypatch):
+    monkeypatch.delenv("NEMOGUARDIAN_WEBHOOK_FORWARD_TEXT", raising=False)
+    client = FakeHTTPClient()
+
+    await webhook.moderate_and_forward(
+        _PII_TEXT,
+        forward_url="http://forward.test/hook",
+        moderator_url="http://moderator.test",
+        client=client,
+    )
+
+    forwarded = client.posts[1]["json"]
+    assert forwarded["forward_text"] == "verdict_only"
+    assert "text" not in forwarded
+    # Neither the raw PII nor any redacted echo of the content is present.
+    assert "jane.doe@example.com" not in str(forwarded)
+    assert "123-45-6789" not in str(forwarded)
+    assert forwarded["text_sha256"] == webhook.text_hash(_PII_TEXT)
+
+
+async def test_webhook_redacted_strips_pii(monkeypatch):
+    monkeypatch.delenv("NEMOGUARDIAN_WEBHOOK_FORWARD_TEXT", raising=False)
+    client = FakeHTTPClient()
+
+    await webhook.moderate_and_forward(
+        _PII_TEXT,
+        forward_url="http://forward.test/hook",
+        moderator_url="http://moderator.test",
+        forward_text="redacted",
+        client=client,
+    )
+
+    forwarded = client.posts[1]["json"]
+    assert forwarded["forward_text"] == "redacted"
+    assert "text" in forwarded
+    assert "jane.doe@example.com" not in forwarded["text"]
+    assert "123-45-6789" not in forwarded["text"]
+    assert "[email]" in forwarded["text"]
+    assert "[ssn]" in forwarded["text"]
+
+
+async def test_webhook_full_forwards_text_only_when_explicit(monkeypatch):
+    monkeypatch.delenv("NEMOGUARDIAN_WEBHOOK_FORWARD_TEXT", raising=False)
+    client = FakeHTTPClient()
+
+    await webhook.moderate_and_forward(
+        _PII_TEXT,
+        forward_url="http://forward.test/hook",
+        moderator_url="http://moderator.test",
+        forward_text="full",
+        client=client,
+    )
+
+    forwarded = client.posts[1]["json"]
+    assert forwarded["forward_text"] == "full"
+    assert forwarded["text"] == _PII_TEXT
+
+
+async def test_webhook_full_requires_explicit_opt_in(monkeypatch):
+    """Without an explicit full/redacted request the raw text stays on-box."""
+    monkeypatch.delenv("NEMOGUARDIAN_WEBHOOK_FORWARD_TEXT", raising=False)
+    client = FakeHTTPClient()
+
+    await webhook.moderate_and_forward(
+        _PII_TEXT,
+        forward_url="http://forward.test/hook",
+        moderator_url="http://moderator.test",
+        client=client,
+    )
+
+    assert client.posts[1]["json"].get("forward_text") == "verdict_only"
+    assert "text" not in client.posts[1]["json"]
+
+
+def test_webhook_resolve_forward_mode_env_and_fallback(monkeypatch):
+    monkeypatch.setenv("NEMOGUARDIAN_WEBHOOK_FORWARD_TEXT", "full")
+    # Explicit argument wins over the environment variable.
+    assert webhook.resolve_forward_mode("redacted") == "redacted"
+    # Env var is used when no explicit argument is supplied.
+    assert webhook.resolve_forward_mode(None) == "full"
+    # Unknown values degrade to the safe default (fail-safe).
+    monkeypatch.setenv("NEMOGUARDIAN_WEBHOOK_FORWARD_TEXT", "leak-everything")
+    assert webhook.resolve_forward_mode(None) == "verdict_only"
+    monkeypatch.delenv("NEMOGUARDIAN_WEBHOOK_FORWARD_TEXT", raising=False)
+    assert webhook.resolve_forward_mode(None) == "verdict_only"
 
 
 def test_config_store_round_trips_platform_defaults(tmp_path):

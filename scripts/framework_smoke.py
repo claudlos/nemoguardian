@@ -213,8 +213,8 @@ async def _check_twitch_adapter(twitch: Any, verdict_label: Any, evidence: dict[
     action = await twitch.make_moderator(cascade, emit=emitted.append)("drop your SSN")
     _add(
         evidence,
-        "twitch_delete_action",
-        action == "delete" and bool(cascade.calls) and bool(emitted),
+        "twitch_flag_action",
+        action == "flag" and bool(cascade.calls) and bool(emitted),
         f"action={action!r}",
         {"mode": cascade.calls[0]["mode"] if cascade.calls else None},
     )

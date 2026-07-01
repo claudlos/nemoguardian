@@ -27,9 +27,29 @@ from nemoguardian.bot import (
 )
 from nemoguardian.bot.types import ModerationAction
 from nemoguardian.cascade import Cascade
+from nemoguardian.review.service import ReviewService
 from nemoguardian.schemas import Mode
 
 WARNING_REACTION = "\N{WARNING SIGN}\N{VARIATION SELECTOR-16}"
+
+#: Normalized actions the Discord adapter can carry out today. Discord.py also
+#: exposes bans, but the current flow only reacts/deletes/times-out/notifies, so
+#: unsupported actions degrade to ``flag`` rather than silently no-op.
+DISCORD_CAPABILITIES: frozenset[ModerationAction] = frozenset(
+    {
+        ModerationAction.ALLOW,
+        ModerationAction.FLAG,
+        ModerationAction.DELETE,
+        ModerationAction.TIMEOUT,
+        ModerationAction.NOTIFY_MODS,
+        ModerationAction.NOTIFY_USER,
+    }
+)
+
+
+def capabilities() -> set[ModerationAction]:
+    """Return the normalized actions the Discord adapter can carry out."""
+    return set(DISCORD_CAPABILITIES)
 
 
 def make_handler(
@@ -37,13 +57,21 @@ def make_handler(
     *,
     config_store: ConfigStore | None = None,
     audit_log: AuditLog | None = None,
+    review_service: ReviewService | None = None,
+    engine: ModerationEngine | None = None,
 ):
-    """Build an async message handler that runs the Discord moderation flow."""
-    engine = ModerationEngine(
+    """Build an async message handler that runs the Discord moderation flow.
+
+    Pass a prebuilt ``engine`` to share one :class:`ModerationEngine` (and its
+    cascade/config/audit) with :class:`DiscordAdapter`; otherwise one is built
+    from ``cascade``/``config_store``/``audit_log`` as before.
+    """
+    engine = engine or ModerationEngine(
         Platform.DISCORD,
         cascade=cascade,
         config_store=config_store,
         audit_log=audit_log,
+        review_service=review_service,
     )
 
     async def on_message(message) -> None:
@@ -151,6 +179,75 @@ async def apply_discord_actions(
     return "+".join(applied) if applied else "planned", None
 
 
+class DiscordAdapter:
+    """Thin :class:`~nemoguardian.adapters.base.PlatformAdapter` over Discord.
+
+    Delegates to the existing module-level helpers so externally-observable
+    behavior is unchanged; it just exposes the normalized interface the rest of
+    the system (and the capability layer) can rely on.
+    """
+
+    platform = Platform.DISCORD
+
+    def __init__(
+        self,
+        cascade: Cascade | None = None,
+        *,
+        config_store: ConfigStore | None = None,
+        audit_log: AuditLog | None = None,
+        review_service: ReviewService | None = None,
+    ) -> None:
+        self.engine = ModerationEngine(
+            Platform.DISCORD,
+            cascade=cascade,
+            config_store=config_store,
+            audit_log=audit_log,
+            review_service=review_service,
+        )
+        self._handler = make_handler(engine=self.engine)
+
+    def capabilities(self) -> set[ModerationAction]:
+        return capabilities()
+
+    def doctor(
+        self,
+        workspace_id: str,
+        permissions: Any = None,
+        *,
+        message_content_enabled: bool = False,
+    ) -> str:
+        """Return a readiness report for ``workspace_id`` (never raises)."""
+        config = self.engine.config_for(str(workspace_id))
+        return _doctor_text(config, permissions, message_content_enabled=message_content_enabled)
+
+    def configure(self, workspace_id: str, **changes: Any) -> BotConfig:
+        """Read (no ``changes``) or update the per-guild config."""
+        if changes:
+            return self.engine.config_store.update(Platform.DISCORD, str(workspace_id), **changes)
+        return self.engine.config_for(str(workspace_id))
+
+    async def handle_event(self, message: Any) -> None:
+        """Moderate one Discord message end to end."""
+        await self._handler(message)
+
+    async def apply_action(
+        self,
+        message: Any,
+        evaluation: ModerationEvaluation,
+    ) -> tuple[str, str | None]:
+        """Apply the planned action to ``message`` (delegates to the action flow)."""
+        return await apply_discord_actions(message, evaluation)
+
+    def record_audit(
+        self,
+        evaluation: ModerationEvaluation,
+        *,
+        execution_status: str,
+        error: str | None = None,
+    ) -> None:
+        self.engine.record(evaluation, execution_status=execution_status, error=error)
+
+
 def run_bot() -> None:
     """Entry point: start the Discord moderation bot."""
     token = os.environ.get("DISCORD_BOT_TOKEN")
@@ -172,7 +269,12 @@ def build_bot():
 
     config_store = ConfigStore()
     audit_log = AuditLog()
-    handler = make_handler(config_store=config_store, audit_log=audit_log)
+    review_service = ReviewService()
+    handler = make_handler(
+        config_store=config_store,
+        audit_log=audit_log,
+        review_service=review_service,
+    )
 
     intents = discord.Intents.default()
     intents.guilds = True
@@ -1156,9 +1258,12 @@ if __name__ == "__main__":
 
 
 __all__ = [
+    "DISCORD_CAPABILITIES",
     "WARNING_REACTION",
+    "DiscordAdapter",
     "apply_discord_actions",
     "build_bot",
+    "capabilities",
     "make_handler",
     "run_bot",
 ]

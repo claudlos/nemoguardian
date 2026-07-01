@@ -1,4 +1,4 @@
-.PHONY: install-dev lint test verify serve smoke smoke-deep eval triage-api-smoke demo-check framework-smoke discord-env-setup discord-live-smoke discord-actor-scenario pre-submit-local final-submission-check docker-build docker-run
+.PHONY: install-dev lint test verify serve smoke smoke-deep platform-smoke eval triage-api-smoke demo-check framework-smoke discord-env-setup discord-live-smoke discord-actor-scenario pre-submit-local final-submission-check docker-build docker-run
 
 PYTHON ?= .venv/bin/python
 PORT ?= 8000
@@ -9,6 +9,7 @@ DEMO_CHECK_FLAGS ?=
 FRAMEWORK_SMOKE_FLAGS ?=
 DISCORD_LIVE_SMOKE_FLAGS ?=
 DISCORD_ACTOR_SCENARIO_FLAGS ?=
+PLATFORM_SMOKE_FLAGS ?=
 TRIAGE_API_SMOKE_FLAGS ?=
 FINAL_CHECK_FLAGS ?=
 
@@ -33,6 +34,12 @@ smoke:
 
 smoke-deep:
 	$(PYTHON) scripts/real_model_smoke.py --deep
+
+# Offline umbrella smoke for every platform adapter (no GPU / network / secrets):
+# drives each adapter through a synthetic event end-to-end and reports a
+# per-platform pass/skip summary. See docs/LIVE_TEST_STRATEGY.md for the live tiers.
+platform-smoke:
+	$(PYTHON) scripts/platform_smoke.py $(PLATFORM_SMOKE_FLAGS)
 
 eval:
 	$(PYTHON) scripts/eval_benchmark.py $(EVAL_FLAGS)
