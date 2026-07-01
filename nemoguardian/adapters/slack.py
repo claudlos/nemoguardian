@@ -394,8 +394,11 @@ def run_bot() -> None:
     if not token:
         raise RuntimeError("SLACK_BOT_TOKEN env var required")
 
-    app = build_app()
     app_token = os.environ.get("SLACK_APP_TOKEN")
+    if not app_token and not os.environ.get("SLACK_SIGNING_SECRET"):
+        raise RuntimeError("SLACK_SIGNING_SECRET env var required for Slack HTTP Events mode")
+
+    app = build_app()
     if app_token:  # pragma: no cover - requires slack_bolt
         from slack_bolt.adapter.socket_mode import SocketModeHandler
 

@@ -503,6 +503,60 @@ def test_run_bot_requires_token(monkeypatch):
         slack.run_bot()
 
 
+def test_run_bot_requires_signing_secret_for_http_mode(monkeypatch):
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.delenv("SLACK_APP_TOKEN", raising=False)
+    monkeypatch.delenv("SLACK_SIGNING_SECRET", raising=False)
+
+    with pytest.raises(RuntimeError, match="SLACK_SIGNING_SECRET env var required"):
+        slack.run_bot()
+
+
+def test_run_bot_starts_http_when_signing_secret_present(monkeypatch):
+    class FakeApp:
+        def __init__(self) -> None:
+            self.started_ports: list[int] = []
+
+        def start(self, *, port: int) -> None:
+            self.started_ports.append(port)
+
+    app = FakeApp()
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_SIGNING_SECRET", "signing-test")
+    monkeypatch.delenv("SLACK_APP_TOKEN", raising=False)
+    monkeypatch.setenv("PORT", "3123")
+    monkeypatch.setattr(slack, "build_app", lambda: app)
+
+    slack.run_bot()
+
+    assert app.started_ports == [3123]
+
+
+def test_run_bot_allows_socket_mode_without_signing_secret(monkeypatch):
+    socket_mode_module = ModuleType("slack_bolt.adapter.socket_mode")
+    starts: list[tuple[Any, str]] = []
+
+    class FakeSocketModeHandler:
+        def __init__(self, app: Any, app_token: str) -> None:
+            self.app = app
+            self.app_token = app_token
+
+        def start(self) -> None:
+            starts.append((self.app, self.app_token))
+
+    app = object()
+    socket_mode_module.SocketModeHandler = FakeSocketModeHandler
+    monkeypatch.setitem(sys.modules, "slack_bolt.adapter.socket_mode", socket_mode_module)
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_APP_TOKEN", "xapp-test")
+    monkeypatch.delenv("SLACK_SIGNING_SECRET", raising=False)
+    monkeypatch.setattr(slack, "build_app", lambda: app)
+
+    slack.run_bot()
+
+    assert starts == [(app, "xapp-test")]
+
+
 def test_import_nemoguardian_does_not_require_slack_bolt():
     assert "slack_bolt" not in sys.modules
 
