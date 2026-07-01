@@ -215,7 +215,7 @@ manually seeding SQLite.
 The same cascade that powers Discord, Twitch, and the HTTP API is also
 exposed to **any agent** — Hermes-driven or otherwise — so an agent can
 screen its own behavior before posting, sending, or acting on untrusted
-content. Two drop-in surfaces:
+content. Three drop-in surfaces:
 
 **1. `nemoguardian guard` CLI verb** — one line, exit-code gate:
 
