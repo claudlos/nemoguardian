@@ -19,9 +19,6 @@
 - 🛡️ You run a **Discord / Twitch / Slack / Telegram** community and need moderation you own.
 - 🤖 You run an **AI agent** and want to gate its inputs/outputs through a real cascade (PII, scams, jailbreaks, prompt injection) — not vibes.
 - 💸 You want **vendor-agnostic infra**: one Docker image, commodity GPUs from $0.07/hr, 9 cloud providers, no managed-SaaS lock-in.
-- 🧾 You need an **auditable trail** (redacted, append-only, SHA-256 case-correlated) for compliance or post-incident review.
-
-If you'd rather pay Hive / OpenAI Moderation and not run anything, this isn't for you.
 
 ## Nemoguardian
 
