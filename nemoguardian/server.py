@@ -454,19 +454,76 @@ async def billing_provision(
     req: ProvisioningRequest,
     auth: billing_auth.AuthContext = Depends(billing_auth.require_api_key),
 ) -> ProvisioningResponse:
-    """Self-hosted tier: spin up a nemoguardian instance for this customer."""
+    """Self-hosted tier: provision a nemoguardian instance for this customer.
+
+    Routed through :func:`provision_instance_guarded` so the operator spend
+    guardrails run before any live spend: an offer above the hourly-price cap or a
+    reservation past the max-hours cap is **rejected** (HTTP 402, no provider
+    call); a request that passes the caps but is not ``confirm``ed comes back as a
+    priced ``planned`` dry-run (still no spend); only a confirmed, in-cap request
+    calls the provider and goes ``live``.
+    """
     if "deploy.self_hosted" not in auth.plan.features:
         raise HTTPException(
             status_code=402,
             detail="self-hosted provisioning requires the self_hosted plan; "
                    "upgrade at /billing/checkout?plan=self_hosted",
         )
-    job = await billing_provisioning.provision_instance(
+    try:
+        provider_enum = ProviderName(req.provider)
+    except ValueError as exc:
+        raise HTTPException(400, f"unknown provider: {req.provider!r}") from exc
+    provider = providers_registry().get(provider_enum)
+
+    offers = await provider.list_offers(
+        gpu_model=req.gpu_model, max_price_usd=req.max_price_usd,
+    )
+    if not offers:
+        raise HTTPException(404, f"no offers available on {req.provider} for that filter")
+    offer = next((o for o in offers if o.offer_id == req.offer_id), None) if req.offer_id else None
+    if offer is None:
+        offer = min(offers, key=lambda o: o.price_per_hour_usd)
+
+    env = {
+        "NEMOGUARDIAN_API_KEY": auth.raw_key,
+        "STRIPE_CUSTOMER_ID": auth.customer.stripe_customer_id or "",
+        "NEMOGUARDIAN_CUSTOMER_ID": str(auth.customer.id),
+        "CASCADE_MODE": "standard",
+    }
+    job = await billing_provisioning.provision_instance_guarded(
         customer_id=auth.customer.id,
         provider=req.provider,
+        offer=offer,
+        provider_client=provider,
+        reserve_hours=req.reserve_hours,
+        confirm=req.confirm,
         ssh_public_key=req.ssh_public_key,
+        image=req.image,
+        env=env,
     )
-    return ProvisioningResponse(job_id=job.id, status=job.status)
+    if job.status == "rejected":
+        # A spend cap refused the request — no provider call, no money spent.
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "error": "spend_cap_exceeded",
+                "message": job.error_message or "provision rejected by spend caps",
+                "provider": req.provider,
+                "hourly_price_usd": offer.price_per_hour_usd,
+                "reserve_hours": req.reserve_hours,
+            },
+        )
+    return ProvisioningResponse(
+        job_id=job.id,
+        status=job.status,
+        instance_id=job.instance_id,
+        endpoint_url=job.endpoint_url,
+        ssh_command=job.ssh_command,
+        error_message=job.error_message,
+        provider=req.provider,
+        hourly_price_usd=offer.price_per_hour_usd,
+        reserve_hours=req.reserve_hours,
+    )
 
 
 @app.get("/billing/jobs/{job_id}", response_model=ProvisioningResponse)
