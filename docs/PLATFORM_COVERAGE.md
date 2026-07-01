@@ -35,8 +35,8 @@ record) · **status**.
 | **Slack** | yes (Events API parsing) | mapped — notify-mods/user via injected client; deletes degrade to `flag` without elevated admin capability | yes | yes | yes | **Adapter skeleton** |
 | **Telegram** | yes (webhook / long-poll parsing) | mapped — delete, ban, mute, notify-mods via injected API; no live admin surface yet | yes | yes | yes | **Adapter skeleton** |
 | **Webhook** | yes (HTTP POST) | no — forwards verdict (verdict-only by default); enforcement degrades to `flag` | yes | n/a | downstream (forwarded verdict is the record) | **Forward** |
-| Matrix | — | — | — | — | — | Planned |
-| Reddit | — | — | — | — | — | Planned |
+| **Matrix** | yes (`m.room.message` parsing) | mapped — redact/delete + notify-mods via injected client; timeout/ban/mute escalate to redact for unsafe content | yes | yes | yes | **Adapter skeleton** |
+| **Reddit** | yes (comments + submissions) | mapped — remove, report, modmail via injected client; timeout/ban/mute escalate to remove for unsafe content | yes | yes | yes | **Adapter skeleton** |
 | YouTube Live | — | — | — | — | — | Planned |
 | Kick | — | — | — | — | — | Planned |
 | Slack slash-commands | — | — | — | — | — | Planned |
@@ -53,16 +53,19 @@ Actions outside this set degrade to `flag` when a policy requests them.
 | Slack | `allow`, `flag`, `notify_mods`, `notify_user` |
 | Telegram | `allow`, `flag`, `delete`, `ban`, `mute`, `notify_mods` |
 | Webhook | `allow`, `flag`, `notify_mods` |
+| Matrix | `allow`, `flag`, `delete`, `notify_mods` |
+| Reddit | `allow`, `flag`, `delete`, `notify_mods` |
 
 ## What "adapter skeleton" honestly means
 
-For Slack and Telegram, the repo ships:
+For Slack, Telegram, Matrix, and Reddit, the repo ships:
 
-- **Event parsing** — `parse_slack_event` / Telegram update parsing turn raw
-  platform payloads into a normalized message and skip non-moderatable events.
-- **Action mapping** — `apply_slack_actions` / `apply_telegram_actions` translate
-  a verdict into platform calls against an **injected** client/API object, so the
-  flow is unit-testable without live credentials.
+- **Event parsing** — Slack events, Telegram updates, Matrix room messages, and
+  Reddit comments/submissions turn raw platform payloads into normalized message
+  objects and skip non-moderatable events.
+- **Action mapping** — each adapter translates a verdict into platform calls
+  against an **injected** client/API object, so the flow is unit-testable without
+  live credentials.
 - **Dry-run** — the same decide-but-don't-act path the Discord bot uses.
 - **Audit** — append-only, redacted JSONL through the shared engine.
 

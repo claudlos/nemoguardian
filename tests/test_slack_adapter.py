@@ -62,10 +62,10 @@ class FakeSlackClient:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.fail = fail or set()
 
-    def _call(self, name: str, **kwargs: Any) -> dict[str, Any]:
-        if name in self.fail:
-            raise RuntimeError(f"{name} failed")
-        self.calls.append((name, kwargs))
+    def _call(self, method_name: str, **kwargs: Any) -> dict[str, Any]:
+        if method_name in self.fail:
+            raise RuntimeError(f"{method_name} failed")
+        self.calls.append((method_name, kwargs))
         return {"ok": True}
 
     def chat_delete(self, **kwargs: Any):
@@ -394,6 +394,66 @@ async def test_apply_delete_degrades_to_flag_without_client():
     assert evaluation.plan.action == ModerationAction.FLAG
 
 
+async def test_apply_flag_reacts_warns_and_notifies_user():
+    config = BotConfig.default(Platform.SLACK, "T1")
+    client = FakeSlackClient()
+    message, evaluation = _evaluation(
+        config=config,
+        action=ModerationAction.FLAG,
+        add_reaction=True,
+        public_warning=True,
+        notify_user=True,
+    )
+
+    status, error = await slack.apply_slack_actions(client, message, evaluation)
+
+    assert error is None
+    assert status == "reaction+warning+notify-user"
+    assert client.names() == ["reactions_add", "chat_postMessage", "chat_postEphemeral"]
+
+
+async def test_apply_collects_reaction_warning_and_notify_errors():
+    config = BotConfig.default(Platform.SLACK, "T1")
+    client = FakeSlackClient(fail={"reactions_add", "chat_postMessage", "chat_postEphemeral"})
+    message, evaluation = _evaluation(
+        config=config,
+        action=ModerationAction.FLAG,
+        add_reaction=True,
+        public_warning=True,
+        notify_user=True,
+    )
+
+    status, error = await slack.apply_slack_actions(client, message, evaluation)
+
+    assert status == "failed"
+    assert error is not None
+    assert "reaction:RuntimeError" in error
+    assert "warning:RuntimeError" in error
+    assert "notify-user:RuntimeError" in error
+
+
+async def test_safe_call_reports_missing_client_and_method():
+    assert await slack._safe_call(None, "chat_postMessage") == (False, "no-client")
+    assert await slack._safe_call(object(), "chat_postMessage") == (False, "unsupported-method")
+
+
+def test_mod_log_text_handles_skipped_evaluation():
+    config = BotConfig.default(Platform.SLACK, "T1")
+    message = slack.SlackMessage(team_id="T1", channel_id="C1", user_id="U1", text="", ts="1.2")
+    evaluation = ModerationEvaluation(
+        context=slack._context_from_message(message),
+        config=config,
+        result=None,
+        plan=ModerationPlan(action=ModerationAction.ALLOW, reason="empty-message"),
+        skipped=True,
+        skip_reason="empty-message",
+    )
+
+    assert slack._mod_log_text(message, evaluation, applied=[], errors=[], notes=[]) == (
+        "nemoguardian skipped a message."
+    )
+
+
 # --- adapter surface -----------------------------------------------------
 
 
@@ -433,6 +493,23 @@ async def test_adapter_handle_event_end_to_end(tmp_path):
     await adapter.handle_event(_event("drop your SSN"), client=client)
 
     assert "chat_delete" not in client.names()
+    assert audit_log.recent()[0]["action"] == "flag"
+
+
+async def test_adapter_apply_action_and_record_audit(tmp_path):
+    config_store, audit_log = _stores(tmp_path)
+    adapter = slack.SlackAdapter(
+        FakeCascade(VerdictLabel.SAFE),
+        config_store=config_store,
+        audit_log=audit_log,
+    )
+    message, evaluation = _evaluation(action=ModerationAction.FLAG)
+    client = FakeSlackClient()
+
+    status, error = await adapter.apply_action(client, message, evaluation)
+    adapter.record_audit(evaluation, execution_status=status, error=error)
+
+    assert status == "planned"
     assert audit_log.recent()[0]["action"] == "flag"
 
 

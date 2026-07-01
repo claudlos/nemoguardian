@@ -1896,6 +1896,40 @@ def test_webhook_resolve_forward_mode_env_and_fallback(monkeypatch):
     assert webhook.resolve_forward_mode(None) == "verdict_only"
 
 
+async def test_webhook_adapter_configure_and_handle_event(monkeypatch):
+    monkeypatch.delenv("NEMOGUARDIAN_API_KEY", raising=False)
+    client = FakeHTTPClient()
+    adapter = webhook.WebhookAdapter(
+        moderator_url="http://old-moderator.test",
+        forward_text="redacted",
+        api_key="old-key",
+    )
+
+    returned = adapter.configure(
+        forward_url="http://forward.test/hook",
+        moderator_url="http://moderator.test",
+        forward_text="full",
+        api_key="new-key",
+    )
+    verdict = await adapter.handle_event(
+        "drop your SSN",
+        policy="block pii",
+        mode="fast",
+        policy_preset="generic",
+        client=client,
+    )
+
+    assert returned is adapter
+    assert verdict["verdict"] == "unsafe"
+    assert client.posts[0]["url"] == "http://moderator.test/v1/moderate"
+    assert client.posts[0]["headers"] == {"Authorization": "Bearer new-key"}
+    assert client.posts[0]["params"] == {"policy_preset": "generic"}
+    assert client.posts[1]["url"] == "http://forward.test/hook"
+    assert client.posts[1]["json"]["forward_text"] == "full"
+    assert client.posts[1]["json"]["text"] == "drop your SSN"
+    assert adapter.record_audit("ignored") is None
+
+
 def test_config_store_round_trips_platform_defaults(tmp_path):
     store = ConfigStore(tmp_path / "config.json")
     discord_config = store.get(Platform.DISCORD, "guild-1")

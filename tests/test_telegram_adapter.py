@@ -7,7 +7,8 @@ repeat-offender escalation, dry-run, ignored chats and redacted audit records.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -19,6 +20,9 @@ from nemoguardian.bot import (
     BotConfig,
     ConfigStore,
     ModerationAction,
+    ModerationContext,
+    ModerationEvaluation,
+    ModerationPlan,
     Platform,
 )
 from nemoguardian.schemas import ModerateResponse, VerdictLabel
@@ -110,6 +114,43 @@ def _update(
     }
 
 
+def _manual_evaluation(
+    parsed: telegram.ParsedMessage,
+    *,
+    config: BotConfig | None = None,
+    result: ModerateResponse | None = None,
+    action: ModerationAction = ModerationAction.DELETE,
+) -> ModerationEvaluation:
+    config = config or BotConfig.default(Platform.TELEGRAM, parsed.chat_id)
+    context = ModerationContext(
+        platform=Platform.TELEGRAM,
+        workspace_id=parsed.chat_id,
+        channel_id=parsed.chat_id,
+        message_id=parsed.message_id,
+        user_id=parsed.user_id,
+        username=parsed.username,
+        text=parsed.text,
+    )
+    if result is None:
+        result = ModerateResponse(
+            verdict=VerdictLabel.UNSAFE,
+            score=0.9,
+            reasons=["fake"],
+            categories=["pii"],
+            matched_policy_rule="fake-rule",
+            model_verdicts={},
+            total_latency_ms=1.0,
+            mode=config.mode,
+            request_id="req-test",
+        )
+    return ModerationEvaluation(
+        context=context,
+        config=config,
+        result=result,
+        plan=ModerationPlan(action=action, reason="pii"),
+    )
+
+
 # --------------------------------------------------------------------------- #
 # parsing
 # --------------------------------------------------------------------------- #
@@ -142,6 +183,7 @@ def test_parse_update_sdk_object():
 def test_parse_update_ignores_private_and_non_message():
     assert telegram.parse_update(_update(chat_type="private")) is None
     assert telegram.parse_update(_update(chat_type="channel")) is None
+    assert telegram.parse_update({"message": {"chat": None}}) is None
     assert telegram.parse_update({"update_id": 1}) is None
     assert telegram.parse_update({}) is None
 
@@ -374,6 +416,106 @@ async def test_api_failure_is_surfaced_not_raised(tmp_path):
     assert "delete:RuntimeError" in record["error"]
 
 
+async def test_ban_failure_is_partial_when_delete_succeeds(tmp_path):
+    config_store, audit_log = _stores(tmp_path)
+    adapter = telegram.TelegramAdapter(
+        FakeCascade(VerdictLabel.UNSAFE),
+        config_store=config_store,
+        audit_log=audit_log,
+        ban_after=1,
+    )
+    api = FakeApi(fail={"ban"})
+
+    await adapter.handle_event(_update(), api=api)
+
+    record = audit_log.recent()[0]
+    assert record["action"] == "ban"
+    assert record["execution_status"] == "partial"
+    assert "ban:RuntimeError" in record["error"]
+
+
+async def test_mute_failure_is_partial_when_delete_succeeds(tmp_path):
+    config_store, audit_log = _stores(tmp_path)
+    config = BotConfig.default(Platform.TELEGRAM, "100")
+    config.timeout_unsafe = True
+    config_store.save(config)
+    adapter = telegram.TelegramAdapter(
+        FakeCascade(VerdictLabel.UNSAFE),
+        config_store=config_store,
+        audit_log=audit_log,
+    )
+    api = FakeApi(fail={"mute"})
+
+    await adapter.handle_event(_update(), api=api)
+
+    record = audit_log.recent()[0]
+    assert record["action"] == "mute"
+    assert record["execution_status"] == "partial"
+    assert "mute:RuntimeError" in record["error"]
+
+
+async def test_notify_mods_failure_is_partial_when_delete_succeeds(tmp_path):
+    config_store, audit_log = _stores(tmp_path)
+    config = BotConfig.default(Platform.TELEGRAM, "100")
+    config.log_channel_id = "999"
+    config_store.save(config)
+    adapter = telegram.TelegramAdapter(
+        FakeCascade(VerdictLabel.UNSAFE),
+        config_store=config_store,
+        audit_log=audit_log,
+    )
+    api = FakeApi(fail={"send"})
+
+    await adapter.handle_event(_update(), api=api)
+
+    record = audit_log.recent()[0]
+    assert record["execution_status"] == "partial"
+    assert "notify_mods:RuntimeError" in record["error"]
+
+
+async def test_delete_disabled_unsafe_degrades_to_planned_flag():
+    parsed = telegram.parse_update(_update())
+    assert parsed is not None
+    config = BotConfig.default(Platform.TELEGRAM, "100")
+    config.delete_unsafe = False
+    evaluation = _manual_evaluation(parsed, config=config)
+    api = FakeApi()
+
+    status, error = await telegram.apply_telegram_actions(api, parsed, evaluation)
+
+    assert (status, error) == ("planned", None)
+    assert evaluation.plan.action is ModerationAction.FLAG
+    assert api.calls == []
+
+
+async def test_apply_result_none_flags_without_api_calls():
+    parsed = telegram.parse_update(_update())
+    assert parsed is not None
+    config = BotConfig.default(Platform.TELEGRAM, "100")
+    context = ModerationContext(
+        platform=Platform.TELEGRAM,
+        workspace_id="100",
+        channel_id="100",
+        message_id=parsed.message_id,
+        user_id=parsed.user_id,
+        username=parsed.username,
+        text=parsed.text,
+    )
+    evaluation = ModerationEvaluation(
+        context=context,
+        config=config,
+        result=None,
+        plan=ModerationPlan(action=ModerationAction.DELETE, reason="skipped"),
+    )
+    api = FakeApi()
+
+    status, error = await telegram.apply_telegram_actions(api, parsed, evaluation)
+
+    assert (status, error) == ("planned", None)
+    assert evaluation.plan.action is ModerationAction.FLAG
+    assert api.calls == []
+
+
 # --------------------------------------------------------------------------- #
 # doctor (offline admin-permission check)
 # --------------------------------------------------------------------------- #
@@ -449,6 +591,58 @@ def test_configure_round_trips(tmp_path):
     assert adapter.configure("100").dry_run is True
 
 
+async def test_adapter_apply_action_and_record_audit(tmp_path):
+    config_store, audit_log = _stores(tmp_path)
+    adapter = telegram.TelegramAdapter(config_store=config_store, audit_log=audit_log)
+    parsed = telegram.parse_update(_update())
+    assert parsed is not None
+    evaluation = _manual_evaluation(parsed)
+    api = FakeApi()
+
+    status, error = await adapter.apply_action(parsed, evaluation, api=api)
+    adapter.record_audit(evaluation, execution_status=status, error=error)
+
+    assert status == "delete"
+    assert audit_log.recent()[0]["action"] == "delete"
+
+
+async def test_bot_api_adapter_converts_ids_and_permissions(monkeypatch):
+    telegram_module = ModuleType("telegram")
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    class ChatPermissions:
+        def __init__(self, *, can_send_messages: bool) -> None:
+            self.can_send_messages = can_send_messages
+
+    class FakeBot:
+        async def delete_message(self, **kwargs: Any) -> None:
+            calls.append(("delete", kwargs))
+
+        async def ban_chat_member(self, **kwargs: Any) -> None:
+            calls.append(("ban", kwargs))
+
+        async def restrict_chat_member(self, **kwargs: Any) -> None:
+            calls.append(("restrict", kwargs))
+
+        async def send_message(self, **kwargs: Any) -> None:
+            calls.append(("send", kwargs))
+
+    telegram_module.ChatPermissions = ChatPermissions
+    monkeypatch.setitem(sys.modules, "telegram", telegram_module)
+    api = telegram._BotApi(FakeBot())
+
+    await api.delete_message("100", "5")
+    await api.ban_chat_member("100", "7")
+    await api.restrict_chat_member("100", "7")
+    await api.send_message("100", "hello")
+
+    assert calls[0] == ("delete", {"chat_id": 100, "message_id": 5})
+    assert calls[1] == ("ban", {"chat_id": 100, "user_id": 7})
+    assert calls[2][0] == "restrict"
+    assert calls[2][1]["permissions"].can_send_messages is False
+    assert calls[3] == ("send", {"chat_id": 100, "text": "hello"})
+
+
 def test_unsupported_action_degrades_to_flag():
     decision = telegram.degrade_action(
         ModerationAction.TIMEOUT,
@@ -464,3 +658,59 @@ def test_run_bot_requires_token(monkeypatch):
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     with pytest.raises(RuntimeError, match="TELEGRAM_BOT_TOKEN env var required"):
         telegram.run_bot()
+
+
+def test_build_application_wires_message_handler(monkeypatch):
+    telegram_parent = ModuleType("telegram")
+    telegram_ext = ModuleType("telegram.ext")
+    handlers: list[Any] = []
+
+    class FakeApplication:
+        @staticmethod
+        def builder():
+            return FakeBuilder()
+
+    class FakeBuilder:
+        def token(self, token: str):
+            self.seen_token = token
+            return self
+
+        def build(self):
+            return self
+
+        def add_handler(self, handler: Any) -> None:
+            handlers.append(handler)
+
+    class FakeMessageHandler:
+        def __init__(self, filters_obj: Any, callback: Any) -> None:
+            self.filters_obj = filters_obj
+            self.callback = callback
+
+    telegram_ext.Application = FakeApplication
+    telegram_ext.MessageHandler = FakeMessageHandler
+    telegram_ext.filters = SimpleNamespace(ALL="all-filters")
+    monkeypatch.setitem(sys.modules, "telegram", telegram_parent)
+    monkeypatch.setitem(sys.modules, "telegram.ext", telegram_ext)
+
+    application = telegram.build_application("token-123")
+
+    assert application.seen_token == "token-123"
+    assert len(handlers) == 1
+    assert handlers[0].filters_obj == "all-filters"
+
+
+def test_run_bot_starts_polling(monkeypatch):
+    class FakeApplication:
+        def __init__(self) -> None:
+            self.ran = False
+
+        def run_polling(self) -> None:
+            self.ran = True
+
+    app = FakeApplication()
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token-123")
+    monkeypatch.setattr(telegram, "build_application", lambda token: app)
+
+    telegram.run_bot()
+
+    assert app.ran is True
