@@ -17,9 +17,9 @@ TBD after `docs/PRE_SUBMIT_CHECKLIST.md` passes on the GPU host.
 
 ## Short Description
 
-Multi-model LLM moderation for agents, Discord, Twitch, and webhooks: Nemotron
-Content Safety Reasoning plus Qwen3Guard, packaged as a billable FastAPI service
-and self-hosted Docker image for commodity GPUs.
+Multi-model LLM moderation for agents, Discord, Twitch, Slack, Telegram, and
+webhooks: Nemotron Content Safety Reasoning plus Qwen3Guard, packaged as a
+billable FastAPI service and self-hosted Docker image for commodity GPUs.
 
 ## Long Description
 
@@ -63,6 +63,8 @@ agent infrastructure product.
 - Unauthenticated `/demo/moderate` path for the recorded hackathon demo when
   explicitly enabled on the recording host.
 - Real local wrappers for Qwen3Guard and Nemotron-CSR, plus API-backed Nemotron triage.
+- Discord full bot, Twitch enforcing chat moderator, and Slack/Telegram adapter
+  skeletons ready for live-token smoke tests.
 - Docker image and compose path for self-hosted GPU deployment.
 - Vast.ai live API client plus provider catalog and cost comparison table.
 
@@ -113,3 +115,4 @@ Docker, self-hosted, GPU, Vast.ai
 - Pre-submit checklist: `docs/PRE_SUBMIT_CHECKLIST.md`
 - Video script: `docs/VIDEO_SCRIPT.md`
 - Evidence file: `demo-evidence.json` from the GPU host
+- Contact: hermes777@agentmail.to

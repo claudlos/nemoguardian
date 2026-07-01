@@ -9,13 +9,15 @@
 
 ---
 
+![nemoguardian moderation cascade hero](docs/nemoguardian-hero.png)
+
 ## Nemoguardian
 
 **nemoguardian is a self-hostable moderation template, not a hosted business
 service.** Clone it, point it at your own Discord / Twitch / webhook surfaces,
-choose your own GPU and API providers, and own your audit data. It is designed
-to run affordably on rented commodity GPUs only when your moderation volume
-warrants it.
+Slack / Telegram / Matrix / Reddit adapter paths, choose your own GPU and API
+providers, and own your audit data. It is designed to run affordably on rented
+commodity GPUs only when your moderation volume warrants it.
 
 At its core is a small FastAPI service and moderation-bot foundation that
 classifies text as **safe / controversial / unsafe** by cascading two to three
@@ -23,12 +25,16 @@ open-source models in series. Use it for:
 
 - **Discord moderation** — the one full bot today: slash-command setup, mod logs,
   dry-run, and append-only audit records.
-- **Twitch live-chat moderation** — per-message verdicts with planned actions
-  (enforcement wiring is partial).
+- **Twitch live-chat moderation** — delete / timeout / ban through an injected
+  chat client, streamer/mod chat commands, dry-run, audit, and persisted
+  repeat-offender escalation.
 - **Generic webhook moderation** — compute a verdict and forward it to any
   downstream platform (verdict-only by default).
-- **Slack / Telegram** — adapter skeletons today: event parsing, action mapping,
-  dry-run, and audit are in place, but there is no turnkey live admin surface yet.
+- **Slack / Telegram** — adapter skeletons with event parsing, action mapping,
+  permission doctors, dry-run, audit, and injectable clients; live-token smoke is
+  the next validation tier.
+- **Matrix / Reddit** — adapter skeletons for room redaction and subreddit
+  remove/report/modmail flows, unit-tested without live credentials.
 - **LLM input/output guardrails** — filter a prompt before it hits your chat model.
 
 Coverage differs per platform and is growing — see the
@@ -37,6 +43,9 @@ Coverage differs per platform and is growing — see the
 code-grounded breakdown. This is a template you self-host: only Discord is a full
 bot today, and **you are responsible for your own GPU spend** (set budgets and
 tear rented boxes down after a run).
+
+Contact: **hermes777@agentmail.to**. This inbox is intended for setup questions,
+live-smoke coordination, and hackathon/reviewer follow-up.
 
 The architecture:
 
@@ -216,17 +225,68 @@ Columns: **ingest** (receive/parse platform events) · **actions enforced**
 | Platform | ingest | actions enforced | doctor | dry-run | audit | status |
 |---|---|---|---|---|---|---|
 | **Discord** | yes | yes (delete, timeout, notify) | yes | yes | yes | **Full bot** |
-| **Twitch** | yes | no (evaluate + flag only) | yes | yes | yes | **Evaluate + flag** |
+| **Twitch** | yes | yes (delete, timeout, ban) | yes | yes | yes | **Enforcing bot** |
 | **Slack** | yes (event parsing) | mapped notifications; deletes degrade to flag | yes | yes | yes | **Adapter skeleton** |
-| **Telegram** | yes (event parsing) | mapped, no live admin surface yet | yes | yes | yes | **Adapter skeleton** |
+| **Telegram** | yes (event parsing) | mapped delete, mute, ban, notify-mods | yes | yes | yes | **Adapter skeleton** |
 | **Webhook** | yes | no — forwards verdict (verdict-only default) | yes | n/a | downstream | **Forward** |
-| Matrix / Reddit / YouTube / Kick / Slack slash-commands | — | — | — | — | — | Planned |
+| **Matrix** | yes | mapped redact/delete + notify-mods | yes | yes | yes | **Adapter skeleton** |
+| **Reddit** | yes | mapped remove, report, modmail | yes | yes | yes | **Adapter skeleton** |
+| YouTube / Kick / Slack slash-commands | — | — | — | — | — | Planned |
 
 Honest framing: this is a **self-hosted template**, not a complete multi-platform
-service. Only **Discord** is a full bot today; the others range from
-evaluate-and-plan (Twitch) to forward-only (webhook) to event-parsing skeletons
-(Slack, Telegram). Actions a platform can't perform degrade to `flag` for review
-rather than being silently dropped.
+service. **Discord** is the flagship full bot; **Twitch** is an enforcing chat
+moderator; Slack, Telegram, Matrix, and Reddit have offline-tested adapter
+skeletons ready for live-token smoke tests. Actions a platform can't perform
+degrade to `flag` for review rather than being silently dropped.
+
+## Quick Slack / Telegram / Twitch smoke
+
+For submission polish, start with the offline umbrella smoke. It exercises the
+real adapter parsers, action mapping, audit writes, and capability degradation
+without live secrets or platform SDKs:
+
+```bash
+make platform-smoke
+make platform-smoke PLATFORM_SMOKE_FLAGS=--json
+```
+
+Then install the live extras for the platforms you want to validate:
+
+```bash
+pip install -e ".[slack,telegram,twitch]"
+```
+
+Slack live checklist:
+
+```bash
+export SLACK_BOT_TOKEN="xoxb-..."
+export SLACK_SIGNING_SECRET="..."
+# Optional Socket Mode:
+export SLACK_APP_TOKEN="xapp-..."
+python - <<'PY'
+import os
+from nemoguardian.adapters.slack import SlackAdapter
+print(SlackAdapter().doctor("T_WORKSPACE", token_configured=bool(os.environ.get("SLACK_BOT_TOKEN"))))
+PY
+```
+
+Telegram live checklist:
+
+```bash
+export TELEGRAM_BOT_TOKEN="..."
+python -m nemoguardian.adapters.telegram
+```
+
+Twitch live checklist:
+
+```bash
+export TWITCH_TOKEN="oauth:..."
+python -m nemoguardian.adapters.twitch <channel_name>
+```
+
+Use a test workspace/group/channel first and keep dry-run enabled until the
+doctor/readiness checks are green. The live-token strategy is documented in
+[`docs/LIVE_TEST_STRATEGY.md`](docs/LIVE_TEST_STRATEGY.md).
 
 ## Real-model demo config
 
@@ -380,7 +440,11 @@ nemoguardian/
 │   │   └── presets.py         ← discord.yaml, twitch.yaml, generic.yaml
 │   └── adapters/
 │       ├── discord.py
+│       ├── slack.py
+│       ├── telegram.py
 │       ├── twitch.py
+│       ├── matrix.py
+│       ├── reddit.py
 │       └── webhook.py
 ├── tests/
 ├── docs/

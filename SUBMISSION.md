@@ -85,6 +85,8 @@ trade-off that fits them. The demo UI (`/demo`) shows the cost comparison table 
 - Full cascade orchestration (guard stack → optional deep triage → aggregator → policy gate)
 - Multi-model aggregator with weighted voting + fail-closed override
 - NemoClaw YAML policy gate with Discord / Twitch / generic presets
+- Discord full bot, Twitch enforcing chat moderator, and Slack / Telegram
+  adapter skeletons ready for live-token smoke tests
 - Stripe subscription tiers + checkout + customer portal + webhook + metered usage
 - Provider registry with 9 clouds; Vast.ai has live API client
 - Docker image + docker-compose for self-hosted
@@ -155,3 +157,4 @@ and ships with a Stripe + multi-cloud story that's real, not mocked.
 - Demo evidence: `demo-evidence.json` from `make demo-check` on the GPU host
 - Final demo video: add hosted recording URL after GPU smoke passes
 - Public writeup: use this file as the source, or adapt it for the final post
+- Contact: hermes777@agentmail.to
