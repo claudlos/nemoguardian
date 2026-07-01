@@ -85,6 +85,45 @@ DEFAULT_BAN_THRESHOLD = 3
 #: Chat-command prefixes an authorized broadcaster/mod can use.
 COMMAND_PREFIXES: tuple[str, ...] = ("!nemo", "!ng", "!guardian")
 
+#: Command words :func:`handle_command` actually recognizes. Only an authorized
+#: sender using one of these is routed to command handling; anything else (e.g.
+#: an unauthorized ``!ng <harmful payload>``) falls through to moderation.
+RECOGNIZED_COMMANDS: frozenset[str] = frozenset(
+    {
+        "status",
+        "config",
+        "help",
+        "commands",
+        "dryrun",
+        "dry_run",
+        "dry-run",
+        "enabled",
+        "enable",
+        "moderation",
+        "policy",
+        "mode",
+    }
+)
+
+#: Max length of an operator/model-derived value embedded in an IRC command
+#: line before truncation.
+_MAX_IRC_FIELD_LEN = 400
+
+
+def _sanitize_irc(value: object) -> str:
+    """Neutralize a value before embedding it in an IRC command string.
+
+    Replaces CR/LF and other control characters with spaces so a crafted
+    ``reason`` (which can carry operator/model text) cannot inject a second IRC
+    line, then truncates to a bounded length. Fail-safe: never raises.
+    """
+    text = str(value)
+    cleaned = "".join(" " if ch in "\r\n" or ord(ch) < 32 else ch for ch in text)
+    cleaned = cleaned.strip()
+    if len(cleaned) > _MAX_IRC_FIELD_LEN:
+        cleaned = cleaned[:_MAX_IRC_FIELD_LEN].rstrip()
+    return cleaned
+
 
 def capabilities() -> set[ModerationAction]:
     """Return the normalized actions the Twitch adapter can carry out."""
@@ -241,6 +280,27 @@ def is_authorized(badges: Any) -> bool:
 _AUTHORIZED_ROLES: frozenset[str] = frozenset({"broadcaster", "moderator", "mod"})
 
 
+def authorized_command(text: str, badges: Any) -> TwitchCommand | None:
+    """Return a command to run ONLY for an authorized, recognized command.
+
+    A message is routed to command handling only when the sender is authorized
+    (:func:`is_authorized`) *and* the parsed command word is one the bot actually
+    recognizes (:data:`RECOGNIZED_COMMANDS`). In every other case — plain chat,
+    an unauthorized user, or a command-prefixed message whose "command" is really
+    a payload (e.g. ``!ng <harmful text>``) — this returns ``None`` so the caller
+    falls through and still moderates the raw message. This is what stops a
+    moderation bypass via the command prefix.
+    """
+    command = parse_command(text)
+    if command is None:
+        return None
+    if not is_authorized(badges):
+        return None
+    if command.name not in RECOGNIZED_COMMANDS:
+        return None
+    return command
+
+
 def handle_command(
     command: TwitchCommand,
     *,
@@ -370,26 +430,34 @@ async def apply_twitch_actions(
     errors: list[str] = []
     reason = _reason(evaluation)
     action = plan.action
+    primary_ok = False
 
     if action == ModerationAction.DELETE:
         ok, err = await _safe_invoke(client, "delete_message", message)
         _record(applied, errors, "delete", ok, err)
+        primary_ok = ok
     elif action == ModerationAction.TIMEOUT:
         ok, err = await _safe_invoke(
             client, "timeout_user", message, seconds=config.timeout_seconds, reason=reason
         )
         _record(applied, errors, "timeout", ok, err)
+        primary_ok = ok
     elif action == ModerationAction.BAN:
         ok, err = await _safe_invoke(client, "ban_user", message, reason=reason)
         _record(applied, errors, "ban", ok, err)
+        primary_ok = ok
     elif action == ModerationAction.FLAG:
         # Degraded / controversial: nothing to enforce, but the case is surfaced.
         applied.append("flag")
 
-    if config.public_warning and action in (
-        ModerationAction.DELETE,
-        ModerationAction.TIMEOUT,
-        ModerationAction.BAN,
+    # Only warn the user when the primary enforcement actually succeeded; a
+    # failed delete/timeout/ban should not advertise a moderation that did not
+    # happen.
+    if (
+        config.public_warning
+        and primary_ok
+        and action
+        in (ModerationAction.DELETE, ModerationAction.TIMEOUT, ModerationAction.BAN)
     ):
         ok, err = await _safe_invoke(
             client, "send_message", message.channel, _warning_text(message, evaluation)
@@ -507,9 +575,11 @@ def make_moderator(
                 None, _message(channel_id, user_id, username, mid, text, badges), evaluation
             )
         else:
+            # Only count an offense when enforcement actually runs; a dry-run
+            # must not climb the escalation counter (delete -> timeout -> ban).
             offenses = (
                 tracker.record(channel_id, user_id)
-                if evaluation.result.verdict == VerdictLabel.UNSAFE
+                if evaluation.result.verdict == VerdictLabel.UNSAFE and not config.dry_run
                 else 0
             )
             status, error = await apply_twitch_actions(
@@ -690,13 +760,48 @@ class _TwitchioClient:  # pragma: no cover - requires a live twitchio connection
         await self._send(message.channel, f"/delete {message.message_id}")
 
     async def timeout_user(self, message: TwitchMessage, *, seconds: int, reason: str) -> None:
-        await self._send(message.channel, f"/timeout {message.username} {seconds} {reason}")
+        safe_reason = _sanitize_irc(reason)
+        await self._send(message.channel, f"/timeout {message.username} {seconds} {safe_reason}")
 
     async def ban_user(self, message: TwitchMessage, *, reason: str) -> None:
-        await self._send(message.channel, f"/ban {message.username} {reason}")
+        await self._send(message.channel, f"/ban {message.username} {_sanitize_irc(reason)}")
 
     async def send_message(self, channel: str, text: str) -> None:
         await self._send(channel, text)
+
+
+async def dispatch_chat(
+    content: str,
+    author: Any,
+    *,
+    moderate: Callable[..., Any],
+    client: TwitchClient | None,
+    config_store: ConfigStore,
+    channel: str,
+    message_id: str | None = None,
+) -> str | None:
+    """Route one incoming chat message.
+
+    Authorized + recognized command -> execute it and return its response text.
+    Everything else (plain chat, an unauthorized sender, or an unrecognized
+    ``!ng <payload>``) -> moderate the raw message and return ``None`` so harmful
+    content is always evaluated/enforced. Never raises on the moderation path.
+    """
+    command = authorized_command(content, author)
+    if command is not None:
+        response = handle_command(
+            command, config_store=config_store, channel_id=channel, badges=author
+        )
+        await _safe_invoke(client, "send_message", channel, response)
+        return response
+    await moderate(
+        content,
+        user_id=str(getattr(author, "id", "unknown")),
+        username=str(getattr(author, "name", "unknown")),
+        message_id=message_id,
+        badges=author,
+    )
+    return None
 
 
 def run_bot(channel: str) -> None:
@@ -721,24 +826,17 @@ def run_bot(channel: str) -> None:
     )
 
     @bot.event
-    async def event_message(message) -> None:
+    async def event_message(message) -> None:  # pragma: no cover - requires live twitchio
         if getattr(message, "echo", False):
             return
-        author = getattr(message, "author", None)
-        content = getattr(message, "content", "") or ""
-        command = parse_command(content)
-        if command is not None:  # pragma: no cover - requires live twitchio channel
-            response = handle_command(
-                command, config_store=config_store, channel_id=channel, badges=author
-            )
-            await _safe_invoke(client, "send_message", channel, response)
-            return
-        await moderate(
-            content,
-            user_id=str(getattr(author, "id", "unknown")),
-            username=str(getattr(author, "name", "unknown")),
+        await dispatch_chat(
+            getattr(message, "content", "") or "",
+            getattr(message, "author", None),
+            moderate=moderate,
+            client=client,
+            config_store=config_store,
+            channel=channel,
             message_id=getattr(message, "id", None),
-            badges=author,
         )
 
     bot.run()
@@ -754,6 +852,7 @@ if __name__ == "__main__":
 __all__ = [
     "COMMAND_PREFIXES",
     "DEFAULT_BAN_THRESHOLD",
+    "RECOGNIZED_COMMANDS",
     "TWITCH_CAPABILITIES",
     "OffenseTracker",
     "TwitchAdapter",
@@ -761,7 +860,9 @@ __all__ = [
     "TwitchCommand",
     "TwitchMessage",
     "apply_twitch_actions",
+    "authorized_command",
     "capabilities",
+    "dispatch_chat",
     "escalate_action",
     "handle_command",
     "is_authorized",
