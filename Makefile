@@ -1,4 +1,4 @@
-.PHONY: install-dev lint test verify serve smoke smoke-deep platform-smoke eval triage-api-smoke demo-check framework-smoke discord-env-setup discord-live-smoke discord-actor-scenario pre-submit-local final-submission-check docker-build docker-run
+.PHONY: install-dev lint test verify serve smoke smoke-deep platform-smoke eval triage-api-smoke demo-check framework-smoke discord-env-setup discord-live-smoke discord-actor-scenario pre-submit-local final-submission-check docker-build docker-run link-check secret-scan build-check ci-guards
 
 PYTHON ?= .venv/bin/python
 PORT ?= 8000
@@ -25,6 +25,18 @@ test:
 	$(PYTHON) -m pytest -q
 
 verify: lint test
+
+# Offline CI reproducibility guards (no network / GPU / secrets).
+link-check:
+	$(PYTHON) scripts/check_doc_links.py
+
+secret-scan:
+	$(PYTHON) scripts/secret_scan.py
+
+build-check:
+	$(PYTHON) scripts/build_check.py $(BUILD_CHECK_FLAGS)
+
+ci-guards: link-check secret-scan build-check
 
 serve:
 	$(PYTHON) -m uvicorn nemoguardian.server:app --host 0.0.0.0 --port $(PORT)
