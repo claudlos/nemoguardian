@@ -13,9 +13,9 @@
 
 ## Nemoguardian
 
-**nemoguardian is a self-hostable moderation template, not a hosted business
-service.** Clone it, point it at your own Discord / Twitch / webhook surfaces,
-Slack / Telegram / Matrix / Reddit adapter paths, choose your own GPU and API
+**A multi-model moderation cascade (Nemotron 4b + Qwen 3 Guard + Nemotron 3 Ultra),** 
+Clone it, point it at your own Discord / Twitch / webhook surfaces,
+Slack / Telegram adapter paths, choose your own GPU and API
 providers, and own your audit data. It is designed to run affordably on rented
 commodity GPUs only when your moderation volume warrants it.
 
