@@ -874,6 +874,7 @@ def test_provision_provisions_when_confirmed_and_in_cap(client, monkeypatch):
     )
     provider = FakeProvider([offer], instance=instance)
     monkeypatch.setattr(srv, "providers_registry", lambda: FakeProviderRegistry([provider]))
+    _fund_gpu_credits(customer, amount_cents=1_000)
 
     r = client.post(
         "/billing/provision",
@@ -881,6 +882,7 @@ def test_provision_provisions_when_confirmed_and_in_cap(client, monkeypatch):
         json={
             "provider": "vastai",
             "confirm": True,
+            "reserve_hours": 3.0,
             "ssh_public_key": "ssh-ed25519 AAAA test",
             "image": "nemoguardian:test",
         },
@@ -899,6 +901,77 @@ def test_provision_provisions_when_confirmed_and_in_cap(client, monkeypatch):
     assert call["env"]["NEMOGUARDIAN_API_KEY"].startswith("nmg_")
     job = billing_db.get_provisioning_job(body["job_id"])
     assert job.status == "live"
+    # The guarded path now reserves GPU credits like its sibling endpoints:
+    # 0.07/hr * 3h = 21c held, leaving 1000 - 21 = 979c.
+    assert body["gpu_credit_reserved_cents"] == 21
+    assert body["gpu_credit_balance_cents"] == 979
+    assert billing_db.gpu_credit_balance_cents(customer.id) == 979
+
+
+def test_provision_unknown_offer_id_is_404(client, monkeypatch):
+    headers, _customer = _auth_headers_for_tier(
+        Tier.SELF_HOSTED, email="badoffer@example.com"
+    )
+    offer = Offer(ProviderName.VAST_AI, "RTX 3090", 24, 0.07, "US", offer_id="fit")
+    provider = FakeProvider([offer])
+    monkeypatch.setattr(srv, "providers_registry", lambda: FakeProviderRegistry([provider]))
+
+    # An explicit but non-existent offer_id must 404 — never silently fall back
+    # to the cheapest offer.
+    r = client.post(
+        "/billing/provision",
+        headers=headers,
+        json={"provider": "vastai", "confirm": True, "offer_id": "does-not-exist"},
+    )
+
+    assert r.status_code == 404, r.text
+    assert "does-not-exist" in r.json()["detail"]
+    assert provider.provision_calls == []
+
+
+def test_provision_refunds_credits_on_provider_failure(client, monkeypatch):
+    headers, customer = _auth_headers_for_tier(
+        Tier.SELF_HOSTED, email="refund@example.com"
+    )
+    offer = Offer(ProviderName.VAST_AI, "RTX 3090", 24, 0.07, "US", offer_id="fit")
+    provider = FakeProvider([offer], provision_error=ProvisionError("no capacity"))
+    monkeypatch.setattr(srv, "providers_registry", lambda: FakeProviderRegistry([provider]))
+    _fund_gpu_credits(customer, amount_cents=1_000)
+
+    r = client.post(
+        "/billing/provision",
+        headers=headers,
+        json={"provider": "vastai", "confirm": True, "reserve_hours": 3.0},
+    )
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "failed"
+    # Reserved then refunded → balance is made whole, nothing left held.
+    assert body["gpu_credit_reserved_cents"] is None
+    assert billing_db.gpu_credit_balance_cents(customer.id) == 1_000
+
+
+def test_provision_over_cap_does_not_reserve_credits(client, monkeypatch):
+    headers, customer = _auth_headers_for_tier(
+        Tier.SELF_HOSTED, email="overcap-noreserve@example.com"
+    )
+    # $0.60/hr is above the default $0.50/hr cap → rejected before any spend.
+    offer = Offer(ProviderName.VAST_AI, "A100 80GB", 80, 0.60, "US", offer_id="pricey")
+    provider = FakeProvider([offer])
+    monkeypatch.setattr(srv, "providers_registry", lambda: FakeProviderRegistry([provider]))
+    _fund_gpu_credits(customer, amount_cents=1_000)
+
+    r = client.post(
+        "/billing/provision",
+        headers=headers,
+        json={"provider": "vastai", "confirm": True},
+    )
+
+    assert r.status_code == 402, r.text
+    assert r.json()["detail"]["error"] == "spend_cap_exceeded"
+    # An over-cap request never reserves — the wallet is untouched.
+    assert billing_db.gpu_credit_balance_cents(customer.id) == 1_000
 
 
 def test_usage_endpoint_returns_allowance(client):

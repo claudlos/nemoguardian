@@ -49,8 +49,12 @@ SECRET_PATTERNS: dict[str, re.Pattern[str]] = {
     "private_key_block": re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----"),
 }
 
-# Inline markers that explicitly waive a line.
-_ALLOW_MARKERS = ("# nosecret", "pragma: allowlist secret", "nosec")
+# Inline markers that explicitly waive a line. The marker must be *comment
+# anchored* (follow a ``#``) so an ordinary word that merely contains "nosec"
+# as a substring — e.g. ``nanoseconds`` — does not silently disable detection.
+_ALLOW_MARKER_RE = re.compile(
+    r"#\s*(?:nosec(?:ret)?|pragma:\s*allowlist secret)\b"
+)
 
 # Path fragments whose files are allowed to contain secret-shaped test fixtures.
 # Matched against the file's repo-relative POSIX path.
@@ -94,7 +98,38 @@ def _redact(match: str) -> str:
 
 
 def _is_allowlisted_path(rel_posix: str, allowlist: tuple[str, ...]) -> bool:
-    return any(fragment in rel_posix for fragment in allowlist)
+    """Match an allowlist entry as a path *prefix* (component-aligned).
+
+    A bare-substring test would let an entry like ``tests/fixtures/`` waive an
+    unrelated file such as ``evil/tests/fixtures_leak.txt``. We instead anchor
+    each entry to the start of the repo-relative path and align it on path
+    boundaries:
+
+    * a trailing-slash entry (``tests/fixtures/``) matches that directory and
+      anything beneath it;
+    * a plain entry matches the exact path, any path beneath it, or a filename
+      in the same directory that *starts with* the entry's last component
+      (so ``tests/test_secret_scan`` covers ``tests/test_secret_scan.py``).
+    """
+    parts = rel_posix.split("/")
+    for fragment in allowlist:
+        frag = fragment.rstrip("/")
+        if rel_posix in (fragment, frag):
+            return True
+        if fragment.endswith("/"):
+            if rel_posix.startswith(fragment):
+                return True
+            continue
+        if rel_posix.startswith(frag + "/"):
+            return True
+        frag_parts = frag.split("/")
+        if (
+            len(parts) == len(frag_parts)
+            and parts[:-1] == frag_parts[:-1]
+            and parts[-1].startswith(frag_parts[-1])
+        ):
+            return True
+    return False
 
 
 def scan_text(text: str, patterns: dict[str, re.Pattern[str]] | None = None) -> list[tuple[int, str, str]]:
@@ -107,7 +142,7 @@ def scan_text(text: str, patterns: dict[str, re.Pattern[str]] | None = None) -> 
     pats = patterns or SECRET_PATTERNS
     hits: list[tuple[int, str, str]] = []
     for lineno, line in enumerate(text.splitlines(), start=1):
-        if any(marker in line for marker in _ALLOW_MARKERS):
+        if _ALLOW_MARKER_RE.search(line):
             continue
         for name, pattern in pats.items():
             match = pattern.search(line)

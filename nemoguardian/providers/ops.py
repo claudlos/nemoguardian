@@ -31,11 +31,13 @@ import asyncio
 import dataclasses
 import datetime as dt
 import json
+import math
 import os
 import threading
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
+from decimal import Decimal
 from enum import Enum
 from pathlib import Path
 from typing import Any, Protocol
@@ -308,8 +310,15 @@ def _default_http_client_factory(*, timeout: float) -> httpx.AsyncClient:
 
 
 def offer_price_cents(offer: Offer) -> int:
-    """Hourly price of an offer in integer cents (rounded to the nearest cent)."""
-    return round(offer.price_per_hour_usd * 100)
+    """Hourly price of an offer in integer cents, rounded **up** (ceil).
+
+    We ceil rather than round-half so that nothing *strictly above* a
+    whole-cent cap can slip through the comparison in :func:`check_caps`
+    (a $0.5049/hr offer must not pass a 50c cap). The price is first
+    quantised through :class:`~decimal.Decimal` to strip binary float noise
+    (``0.07 * 100 == 7.000000000000001`` would otherwise ceil to 8).
+    """
+    return math.ceil(Decimal(str(offer.price_per_hour_usd)) * 100)
 
 
 def check_caps(offer: Offer, reserve_hours: float, config: GpuOpsConfig) -> CapCheck:
@@ -379,7 +388,11 @@ async def provision_guarded(
         ))
         return _result(ProvisionStatus.REJECTED, reason)
 
-    confirmed = confirm or not config.require_confirm
+    # Zero-cost offers (e.g. the on_prem "bring your own GPU" offer) have no
+    # spend to gate, so there is nothing for the confirm guard to protect —
+    # auto-confirm them and return a usable result instead of a dry-run plan.
+    zero_cost = price_cents <= 0
+    confirmed = confirm or not config.require_confirm or zero_cost
     if not confirmed:
         reason = "dry-run: caps OK; pass confirm=True (or set NEMOGUARDIAN_OPS_CONFIRM) to provision"
         _emit(event_log, OpsEvent(

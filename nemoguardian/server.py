@@ -48,6 +48,7 @@ from nemoguardian.providers import (
 from nemoguardian.providers import (
     list_providers as providers_list,
 )
+from nemoguardian.providers import ops as providers_ops
 from nemoguardian.providers.base import CASCADE_VRAM_COMFORT_GB
 from nemoguardian.providers.registry import default_registry as providers_registry
 from nemoguardian.schemas import (
@@ -478,9 +479,50 @@ async def billing_provision(
     )
     if not offers:
         raise HTTPException(404, f"no offers available on {req.provider} for that filter")
-    offer = next((o for o in offers if o.offer_id == req.offer_id), None) if req.offer_id else None
-    if offer is None:
+    if req.offer_id is not None:
+        # An explicit offer must exist: never silently substitute the cheapest.
+        offer = next((o for o in offers if o.offer_id == req.offer_id), None)
+        if offer is None:
+            raise HTTPException(
+                404, f"offer {req.offer_id!r} not available on {req.provider}"
+            )
+    else:
         offer = min(offers, key=lambda o: o.price_per_hour_usd)
+
+    # Mirror the sibling /billing/provision/cheapest + /{provider} endpoints:
+    # reserve GPU credits *before* a live provision and refund on failure. Only a
+    # request that will actually spend reserves — an unconfirmed 'planned'
+    # dry-run, an over-cap request, and zero-cost offers (e.g. on_prem) touch no
+    # credits.
+    ops_config = providers_ops.GpuOpsConfig.from_env()
+    confirmed = req.confirm or not ops_config.require_confirm
+    zero_cost = offer.price_per_hour_usd <= 0
+    cap = providers_ops.check_caps(offer, req.reserve_hours, ops_config)
+    reserve_cents = _gpu_credit_required_cents(offer.price_per_hour_usd, req.reserve_hours)
+    should_reserve = confirmed and cap.ok and not zero_cost
+
+    reserved = False
+    if should_reserve:
+        try:
+            billing_db.reserve_gpu_credits(
+                customer_id=auth.customer.id,
+                amount_cents=reserve_cents,
+                provider=req.provider,
+                description=f"Reserve {req.reserve_hours:g}h for {req.provider} {offer.gpu_model}",
+                metadata={"offer": offer.to_dict(), "reserve_hours": req.reserve_hours},
+            )
+            reserved = True
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "error": "insufficient_gpu_credits",
+                    "message": str(exc),
+                    "required_cents": reserve_cents,
+                    "balance_cents": billing_db.gpu_credit_balance_cents(auth.customer.id),
+                    "top_up_url": "/billing/gpu-credits/checkout",
+                },
+            ) from exc
 
     env = {
         "NEMOGUARDIAN_API_KEY": auth.raw_key,
@@ -495,10 +537,24 @@ async def billing_provision(
         provider_client=provider,
         reserve_hours=req.reserve_hours,
         confirm=req.confirm,
+        ops_config=ops_config,
         ssh_public_key=req.ssh_public_key,
         image=req.image,
         env=env,
     )
+    if reserved and job.status not in ("live", "provisioning"):
+        # No live instance came back (rejected/failed) — refund the reservation
+        # so a failed provision never silently burns the customer's credits.
+        billing_db.record_gpu_credit_event(
+            customer_id=auth.customer.id,
+            event_type="provision_refund",
+            amount_cents=reserve_cents,
+            provider=req.provider,
+            job_id=job.id,
+            description="Refund GPU credit reservation after provisioning failure",
+            metadata={"reason": job.error_message or job.status},
+        )
+        reserved = False
     if job.status == "rejected":
         # A spend cap refused the request — no provider call, no money spent.
         raise HTTPException(
@@ -521,6 +577,10 @@ async def billing_provision(
         provider=req.provider,
         hourly_price_usd=offer.price_per_hour_usd,
         reserve_hours=req.reserve_hours,
+        gpu_credit_reserved_cents=reserve_cents if reserved else None,
+        gpu_credit_balance_cents=(
+            billing_db.gpu_credit_balance_cents(auth.customer.id) if should_reserve else None
+        ),
     )
 
 
