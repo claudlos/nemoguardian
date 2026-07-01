@@ -12,7 +12,6 @@ from uuid import uuid4
 
 import structlog
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 
 from nemoguardian.billing import auth as billing_auth
@@ -39,6 +38,7 @@ from nemoguardian.billing.schemas import (
     UsageResponse,
 )
 from nemoguardian.cascade import Cascade, CascadeConfig
+from nemoguardian.middleware import install_hardening
 from nemoguardian.policy.nemoclaw import NemoclawPolicy
 from nemoguardian.policy.presets import PRESETS, get_preset
 from nemoguardian.providers import (
@@ -94,12 +94,10 @@ app = FastAPI(
     version="0.1.0",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Production hardening: env-configurable CORS allowlist (no wildcard by
+# default), per-key/IP rate limiting, and a request body-size cap on the
+# moderation endpoints. See nemoguardian.middleware for the config knobs.
+install_hardening(app)
 
 
 @app.get("/health", response_model=HealthResponse)
