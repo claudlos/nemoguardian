@@ -31,7 +31,7 @@ record) · **status**.
 | Platform | ingest | actions enforced | doctor | dry-run | audit | status |
 |---|---|---|---|---|---|---|
 | **Discord** | yes (gateway) | yes — delete, timeout, notify-mods/user | yes | yes | yes | **Full bot** |
-| **Twitch** | yes (live chat) | no — evaluates and flags for review/audit; live delete/timeout/ban API calls are not wired yet | yes | yes | yes | **Evaluate + flag** |
+| **Twitch** | yes (live chat) | yes — delete, timeout, ban via an injected chat/API client (repeat offenders escalate delete→timeout→ban); no client wired ⇒ degrades to `flag` | yes | yes | yes | **Enforcing bot** |
 | **Slack** | yes (Events API parsing) | mapped — notify-mods/user via injected client; deletes degrade to `flag` without elevated admin capability | yes | yes | yes | **Adapter skeleton** |
 | **Telegram** | yes (webhook / long-poll parsing) | mapped — delete, ban, mute, notify-mods via injected API; no live admin surface yet | yes | yes | yes | **Adapter skeleton** |
 | **Webhook** | yes (HTTP POST) | no — forwards verdict (verdict-only by default); enforcement degrades to `flag` | yes | n/a | downstream (forwarded verdict is the record) | **Forward** |
@@ -49,7 +49,7 @@ Actions outside this set degrade to `flag` when a policy requests them.
 | Platform | Declared capabilities |
 |---|---|
 | Discord | `allow`, `flag`, `delete`, `timeout`, `notify_mods`, `notify_user` |
-| Twitch | `allow`, `flag` |
+| Twitch | `allow`, `flag`, `delete`, `timeout`, `ban` |
 | Slack | `allow`, `flag`, `notify_mods`, `notify_user` |
 | Telegram | `allow`, `flag`, `delete`, `ban`, `mute`, `notify_mods` |
 | Webhook | `allow`, `flag`, `notify_mods` |

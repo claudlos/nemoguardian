@@ -1660,7 +1660,7 @@ def test_twitch_run_bot_registers_event_and_ignores_echo(monkeypatch):
     calls: list[dict[str, str]] = []
     make_kwargs: list[dict[str, Any]] = []
 
-    async def fake_moderate(text: str, *, user_id: str, username: str) -> str:
+    async def fake_moderate(text: str, *, user_id: str, username: str, **_extra: Any) -> str:
         calls.append({"text": text, "user_id": user_id, "username": username})
         return "delete"
 

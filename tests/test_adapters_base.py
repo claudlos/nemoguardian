@@ -122,9 +122,13 @@ def test_adapter_capabilities_match_module_helpers(tmp_path):
 def test_capability_sets_reflect_platform_enforcement():
     assert ModerationAction.TIMEOUT in discord.capabilities()
     assert ModerationAction.NOTIFY_USER in discord.capabilities()
-    assert ModerationAction.DELETE not in twitch.capabilities()
-    assert ModerationAction.TIMEOUT not in twitch.capabilities()
-    assert ModerationAction.BAN not in twitch.capabilities()
+    # Twitch is a real moderator: it can delete/timeout/ban via its chat client.
+    assert ModerationAction.DELETE in twitch.capabilities()
+    assert ModerationAction.TIMEOUT in twitch.capabilities()
+    assert ModerationAction.BAN in twitch.capabilities()
+    # But it cannot mute or queue -> those degrade to flag.
+    assert ModerationAction.MUTE not in twitch.capabilities()
+    assert ModerationAction.QUEUE not in twitch.capabilities()
     # A webhook only forwards a verdict; it cannot delete/timeout/ban.
     assert ModerationAction.DELETE not in webhook.capabilities()
     assert ModerationAction.TIMEOUT not in webhook.capabilities()
@@ -171,7 +175,7 @@ def test_adapter_apply_action_degrades_via_capabilities(tmp_path):
     assert decision.action is ModerationAction.FLAG
     assert decision.degraded is True
 
-    # Twitch currently evaluates and flags; enforcement actions degrade.
+    # Twitch is a real moderator: timeout/ban pass through unchanged...
     twitch_adapter = _twitch_adapter(tmp_path)
     plan = ModerationPlan(action=ModerationAction.TIMEOUT)
     evaluation = ModerationEvaluation(
@@ -181,9 +185,14 @@ def test_adapter_apply_action_degrades_via_capabilities(tmp_path):
         plan=plan,
     )
     timeout_decision = twitch_adapter.apply_action(evaluation)
-    assert timeout_decision.action is ModerationAction.FLAG
-    assert timeout_decision.degraded is True
-    assert timeout_decision.reason == "timeout unsupported on twitch -> degraded to flag"
+    assert timeout_decision.action is ModerationAction.TIMEOUT
+    assert timeout_decision.degraded is False
+    assert timeout_decision.reason is None
+    plan.action = ModerationAction.BAN
+    ban_decision = twitch_adapter.apply_action(evaluation)
+    assert ban_decision.action is ModerationAction.BAN
+    assert ban_decision.degraded is False
+    # ...but an action Twitch cannot do (mute) still degrades to flag.
     plan.action = ModerationAction.MUTE
     degraded = twitch_adapter.apply_action(evaluation)
     assert degraded.action is ModerationAction.FLAG
