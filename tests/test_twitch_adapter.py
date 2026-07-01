@@ -16,6 +16,7 @@ import pytest
 from nemoguardian.adapters import twitch
 from nemoguardian.bot import AuditLog, ConfigStore
 from nemoguardian.bot.types import ModerationAction, Platform
+from nemoguardian.review import ReviewService, StrikeLedger
 from nemoguardian.schemas import Mode, ModerateResponse, VerdictLabel
 
 
@@ -158,6 +159,69 @@ async def test_repeat_offender_escalates_delete_timeout_ban(tmp_path):
     assert client.deleted == ["a"]
     assert [t[0] for t in client.timeouts] == ["troll"]
     assert client.bans == [("troll", "policy violation")]
+
+
+def test_offense_tracker_persists_to_strike_ledger(tmp_path):
+    path = tmp_path / "strikes.jsonl"
+    ledger = StrikeLedger(path)
+    tracker = twitch.OffenseTracker(ledger)
+
+    assert tracker.record(
+        "chan",
+        "troll",
+        username="Troll",
+        reason="spam",
+        categories=["Spam"],
+        case_id="case-1",
+        details={"message_id": "m1"},
+    ) == 1
+
+    restarted_ledger = StrikeLedger(path)
+    restarted = twitch.OffenseTracker(restarted_ledger)
+    assert restarted.count("chan", "troll") == 1
+    assert restarted.record("chan", "troll", username="Troll", case_id="case-2") == 2
+
+    strikes = restarted_ledger.active_strikes(Platform.TWITCH, "chan", "troll")
+    assert [strike.case_id for strike in strikes] == ["case-1", "case-2"]
+    assert strikes[0].reason == "spam"
+    assert strikes[0].details["message_id"] == "m1"
+
+
+async def test_repeat_offender_escalation_survives_new_moderator(tmp_path):
+    review_dir = tmp_path / "review"
+    config_store, audit_log = _stores(tmp_path)
+    service1 = ReviewService.from_dir(review_dir)
+    client1 = FakeTwitchClient()
+    moderate1 = twitch.make_moderator(
+        FakeCascade(VerdictLabel.UNSAFE),
+        config_store=config_store,
+        audit_log=audit_log,
+        review_service=service1,
+        channel_id="chan",
+        client=client1,
+        emit=lambda _msg: None,
+    )
+
+    first = await moderate1("bad1", user_id="troll", username="troll", message_id="a")
+
+    service2 = ReviewService.from_dir(review_dir)
+    client2 = FakeTwitchClient()
+    moderate2 = twitch.make_moderator(
+        FakeCascade(VerdictLabel.UNSAFE),
+        config_store=config_store,
+        audit_log=audit_log,
+        review_service=service2,
+        channel_id="chan",
+        client=client2,
+        emit=lambda _msg: None,
+    )
+
+    second = await moderate2("bad2", user_id="troll", username="troll", message_id="b")
+
+    assert (first, second) == ("delete", "timeout")
+    assert client1.deleted == ["a"]
+    assert client2.timeouts == [("troll", 600, "policy violation")]
+    assert service2.strikes.total(Platform.TWITCH, "chan", "troll") == 2
 
 
 def test_escalate_action_pure_function():

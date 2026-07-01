@@ -8,11 +8,13 @@ moderation actions** through an *injectable* chat/API client: delete a message
 the full action flow with a fake and never need a live Twitch connection.
 
 Repeat unsafe offenders escalate delete -> timeout -> ban (see
-:func:`escalate_action` + :class:`OffenseTracker`). Anything Twitch chat cannot
-do (mute / queue / notify_* ...) degrades to ``flag`` with an auditable reason
-via :func:`~nemoguardian.adapters.base.degrade_action`. When no client is wired
-in the adapter cannot reach Twitch, so enforcement degrades to ``flag`` for
-review rather than being silently dropped.
+:func:`escalate_action` + :class:`OffenseTracker`). The tracker persists through
+the shared strike ledger when one is configured, with an in-memory fallback for
+standalone/offline use. Anything Twitch chat cannot do (mute / queue /
+notify_* ...) degrades to ``flag`` with an auditable reason via
+:func:`~nemoguardian.adapters.base.degrade_action`. When no client is wired in
+the adapter cannot reach Twitch, so enforcement degrades to ``flag`` for review
+rather than being silently dropped.
 
 Broadcasters and moderators can configure the bot from chat with ``!nemo``
 commands (``status`` / ``dryrun`` / ``policy`` / ``mode``), mirroring the Discord
@@ -48,9 +50,11 @@ from nemoguardian.bot import (
     ModerationEvaluation,
     Platform,
 )
+from nemoguardian.bot.engine import REVIEW_DIR_ENV, case_id
 from nemoguardian.bot.types import ModerationAction
 from nemoguardian.cascade import Cascade, CascadeConfig
 from nemoguardian.review.service import ReviewService
+from nemoguardian.review.store import StrikeLedger
 from nemoguardian.schemas import Mode, VerdictLabel
 
 #: Normalized actions the Twitch adapter can carry out with an injected chat/API
@@ -173,26 +177,88 @@ class TwitchClient(Protocol):
 
 @dataclass
 class OffenseTracker:
-    """In-memory per-(channel, user) unsafe-offense counter for escalation.
+    """Per-(channel, user) unsafe-offense counter for escalation.
 
-    Deliberately simple and process-local: a self-hosted single-channel bot only
-    needs enough memory to escalate a repeat offender within a session. Swap for
-    a persistent store later without touching the action flow.
+    When a :class:`~nemoguardian.review.store.StrikeLedger` is available, each
+    unsafe Twitch action appends a strike and escalation uses the active ledger
+    total. That lets repeat-offender escalation survive reconnects/restarts and
+    lets restore/appeal flows void false-positive strikes. If the ledger is not
+    configured or fails, the tracker falls back to the old process-local counter
+    so moderation remains fail-safe.
     """
 
+    strike_ledger: StrikeLedger | None = None
     _counts: dict[tuple[str, str], int] = field(default_factory=dict)
 
-    def record(self, channel: str, user_id: str) -> int:
+    def record(
+        self,
+        channel: str,
+        user_id: str,
+        *,
+        username: str = "",
+        reason: str = "",
+        categories: list[str] | None = None,
+        case_id: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> int:
         """Increment and return the offense count for ``(channel, user_id)``."""
+        if self.strike_ledger is not None:
+            try:
+                self.strike_ledger.add_strike(
+                    platform=Platform.TWITCH,
+                    workspace_id=channel,
+                    user_id=user_id,
+                    username=username,
+                    reason=reason,
+                    categories=categories or [],
+                    case_id=case_id,
+                    details={"source": "twitch_adapter", **(details or {})},
+                )
+                return self.count(channel, user_id)
+            except Exception:
+                # Strike persistence is bookkeeping; never let it break or skip
+                # live moderation.
+                pass
         key = (channel, user_id)
         self._counts[key] = self._counts.get(key, 0) + 1
         return self._counts[key]
 
     def count(self, channel: str, user_id: str) -> int:
-        return self._counts.get((channel, user_id), 0)
+        fallback_count = self._counts.get((channel, user_id), 0)
+        if self.strike_ledger is not None:
+            try:
+                ledger_count = int(
+                    self.strike_ledger.total(Platform.TWITCH, channel, user_id)
+                )
+                return max(ledger_count, fallback_count)
+            except Exception:
+                pass
+        return fallback_count
 
     def reset(self, channel: str, user_id: str) -> None:
+        if self.strike_ledger is not None:
+            try:
+                for strike in self.strike_ledger.active_strikes(
+                    Platform.TWITCH, channel, user_id
+                ):
+                    self.strike_ledger.void_strike(
+                        strike.strike_id, reason="twitch offense counter reset"
+                    )
+            except Exception:
+                pass
         self._counts.pop((channel, user_id), None)
+
+
+def _strike_ledger_for(review_service: ReviewService | None) -> StrikeLedger | None:
+    if review_service is not None:
+        return review_service.strikes
+    review_dir = os.environ.get(REVIEW_DIR_ENV)
+    if not review_dir:
+        return None
+    try:
+        return ReviewService.from_dir(review_dir).strikes
+    except Exception:
+        return None
 
 
 def escalate_action(
@@ -544,7 +610,12 @@ def make_moderator(
             audit_log=audit_log,
             review_service=review_service,
         )
-    tracker = offense_tracker if offense_tracker is not None else OffenseTracker()
+    review_for_strikes = review_service if review_service is not None else engine.review_service
+    tracker = (
+        offense_tracker
+        if offense_tracker is not None
+        else OffenseTracker(_strike_ledger_for(review_for_strikes))
+    )
 
     async def moderate(
         text: str,
@@ -578,7 +649,15 @@ def make_moderator(
             # Only count an offense when enforcement actually runs; a dry-run
             # must not climb the escalation counter (delete -> timeout -> ban).
             offenses = (
-                tracker.record(channel_id, user_id)
+                tracker.record(
+                    channel_id,
+                    user_id,
+                    username=username,
+                    reason=evaluation.plan.reason,
+                    categories=evaluation.result.categories,
+                    case_id=case_id(evaluation.context),
+                    details={"message_id": mid},
+                )
                 if evaluation.result.verdict == VerdictLabel.UNSAFE and not config.dry_run
                 else 0
             )
@@ -642,7 +721,7 @@ class TwitchAdapter:
     ) -> None:
         self.channel_id = channel_id
         self.client = client
-        self.offense_tracker = OffenseTracker()
+        self.offense_tracker = OffenseTracker(_strike_ledger_for(review_service))
         self.engine = ModerationEngine(
             Platform.TWITCH,
             cascade=cascade,
