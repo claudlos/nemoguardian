@@ -51,10 +51,24 @@ from nemoguardian.bot.engine import case_id
 from nemoguardian.bot.types import ModerationAction
 from nemoguardian.cascade import Cascade
 from nemoguardian.review.service import ReviewService
+from nemoguardian.schemas import VerdictLabel
 
 #: Reddit mod permissions this adapter needs. ``all`` (full mod) grants both.
 REDDIT_REQUIRED_PERMISSIONS: tuple[str, ...] = ("posts",)
 REDDIT_RECOMMENDED_PERMISSIONS: tuple[str, ...] = ("mail",)
+
+#: Enforcement actions (stronger than ``flag``). When an UNSAFE verdict asks for
+#: one of these and Reddit can't perform it, fall back to the strongest SUPPORTED
+#: enforcement (``delete`` -> ``remove``) instead of degrading all the way to a
+#: ``flag`` (report).
+ENFORCEMENT_ACTIONS: frozenset[ModerationAction] = frozenset(
+    {
+        ModerationAction.DELETE,
+        ModerationAction.TIMEOUT,
+        ModerationAction.MUTE,
+        ModerationAction.BAN,
+    }
+)
 
 #: Normalized actions a subreddit-moderator bot can carry out. ``remove`` maps to
 #: :data:`ModerationAction.DELETE` and ``report`` to :data:`ModerationAction.FLAG`;
@@ -157,6 +171,41 @@ def reddit_decision(action: ModerationAction | str) -> ActionDecision:
     return degrade_action(action, capabilities(), Platform.REDDIT)
 
 
+def _resolve_reddit_action(
+    action: ModerationAction | str,
+    evaluation: ModerationEvaluation,
+) -> ActionDecision:
+    """Degrade ``action`` against Reddit capabilities, avoiding under-enforcement.
+
+    Generic degradation sends an unsupported action to ``flag`` (a report). But
+    for an UNSAFE verdict asking for an enforcement action Reddit can't perform
+    (e.g. ``timeout``/``ban``), that under-enforces. Fall back to the strongest
+    SUPPORTED enforcement (``delete`` -> ``remove``) instead.
+    """
+    decision = degrade_action(action, capabilities(), Platform.REDDIT)
+    if (
+        decision.degraded
+        and _is_unsafe(evaluation)
+        and decision.requested in ENFORCEMENT_ACTIONS
+        and ModerationAction.DELETE in capabilities()
+    ):
+        return ActionDecision(
+            action=ModerationAction.DELETE,
+            requested=decision.requested,
+            degraded=True,
+            reason=(
+                f"{decision.requested.value} unsupported on {Platform.REDDIT.value} "
+                f"-> escalated to {ModerationAction.DELETE.value}"
+            ),
+        )
+    return decision
+
+
+def _is_unsafe(evaluation: ModerationEvaluation) -> bool:
+    result = evaluation.result
+    return result is not None and result.verdict == VerdictLabel.UNSAFE
+
+
 def _context_from_item(item: RedditItem) -> ModerationContext:
     return ModerationContext(
         platform=Platform.REDDIT,
@@ -206,7 +255,7 @@ async def apply_reddit_actions(
     if plan.action == ModerationAction.ALLOW:
         return "allowed", None
 
-    decision = degrade_action(plan.action, capabilities(), Platform.REDDIT)
+    decision = _resolve_reddit_action(plan.action, evaluation)
     notes: list[str] = []
     if decision.degraded:
         notes.append(decision.reason or "degraded")
@@ -497,7 +546,13 @@ def build_reddit():  # pragma: no cover - requires praw
 
 
 def run_bot() -> None:  # pragma: no cover - manual entry point
-    """Entry point: stream a subreddit's new comments/submissions and moderate."""
+    """Entry point: stream a subreddit's new comments *and* submissions and moderate.
+
+    Both streams block, so each is consumed on its own daemon thread; submissions
+    are moderated alongside comments (the handler already supports both shapes).
+    """
+    import threading
+
     if not (os.environ.get("REDDIT_CLIENT_ID") and os.environ.get("REDDIT_CLIENT_SECRET")):
         raise RuntimeError("REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET env vars required")
     subreddit_name = os.environ.get("REDDIT_SUBREDDIT")
@@ -509,8 +564,19 @@ def run_bot() -> None:  # pragma: no cover - manual entry point
     client = _PrawClient(reddit)
     subreddit = reddit.subreddit(subreddit_name)
 
-    for comment in subreddit.stream.comments(skip_existing=True):
-        asyncio.run(handler(comment, client=client))
+    def _consume(stream: Any) -> None:
+        for item in stream:
+            asyncio.run(handler(item, client=client))
+
+    streams = (
+        subreddit.stream.comments(skip_existing=True),
+        subreddit.stream.submissions(skip_existing=True),
+    )
+    threads = [threading.Thread(target=_consume, args=(stream,), daemon=True) for stream in streams]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
 
 
 if __name__ == "__main__":  # pragma: no cover - manual entry point

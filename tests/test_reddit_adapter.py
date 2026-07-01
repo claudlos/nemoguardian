@@ -257,6 +257,23 @@ async def test_handler_removes_unsafe_and_audits_redacted(tmp_path):
         assert all("jane@example.com" not in str(arg) for arg in args)
 
 
+async def test_handler_moderates_submission(tmp_path):
+    # Submissions (not just comments) are moderated end to end.
+    config_store, audit_log = _stores(tmp_path)
+    client = FakeRedditClient()
+
+    result = await reddit.make_handler(
+        FakeCascade(VerdictLabel.UNSAFE, categories=["PII"]),
+        config_store=config_store,
+        audit_log=audit_log,
+    )(_submission("A bad title", "with SSN 123-45-6789"), client=client)
+
+    assert result is not None
+    assert "remove" in client.names()
+    assert client.args_for("remove")[0] == "submission"
+    assert audit_log.recent()[0]["action"] == "delete"
+
+
 async def test_handler_reports_controversial(tmp_path):
     config_store, audit_log = _stores(tmp_path)
     client = FakeRedditClient()
@@ -326,7 +343,9 @@ async def test_handler_async_client_is_awaited(tmp_path):
 # --- apply / degradation -------------------------------------------------
 
 
-async def test_apply_degrades_unsupported_ban_to_report(tmp_path):
+async def test_apply_escalates_unsupported_enforcement_to_remove(tmp_path):
+    # An UNSAFE verdict asking for BAN (unsupported) must not under-enforce to a
+    # bare report: it falls back to the strongest supported enforcement (remove).
     config = BotConfig.default(Platform.REDDIT, "testsub")
     config.log_channel_id = "modmail"
     client = FakeRedditClient()
@@ -335,12 +354,42 @@ async def test_apply_degrades_unsupported_ban_to_report(tmp_path):
     status, error = await reddit.apply_reddit_actions(client, item, evaluation)
 
     assert error is None
+    assert status == "remove+modmail"
+    assert evaluation.plan.action == ModerationAction.DELETE
+    assert "report" not in client.names()
+    assert "remove" in client.names()
+    note = client.args_for("send_modmail")[2]
+    assert "escalated to delete" in note
+
+
+async def test_apply_escalates_timeout_to_remove_not_report(tmp_path):
+    config = BotConfig.default(Platform.REDDIT, "testsub")
+    config.log_channel_id = "modmail"
+    client = FakeRedditClient()
+    item, evaluation = _evaluation(config=config, action=ModerationAction.TIMEOUT)
+
+    status, error = await reddit.apply_reddit_actions(client, item, evaluation)
+
+    assert error is None
+    assert status == "remove+modmail"
+    assert evaluation.plan.action == ModerationAction.DELETE
+    assert "remove" in client.names()
+
+
+async def test_apply_degrades_to_report_when_verdict_not_unsafe(tmp_path):
+    # Escalation is gated on an UNSAFE verdict; a controversial item still reports
+    # for a genuinely unsupported action.
+    config = BotConfig.default(Platform.REDDIT, "testsub")
+    config.log_channel_id = "modmail"
+    client = FakeRedditClient()
+    item, evaluation = _evaluation(config=config, action=ModerationAction.TIMEOUT)
+    evaluation.result.verdict = VerdictLabel.CONTROVERSIAL
+
+    status, _error = await reddit.apply_reddit_actions(client, item, evaluation)
+
     assert status == "report+modmail"
     assert evaluation.plan.action == ModerationAction.FLAG
     assert "remove" not in client.names()
-    assert client.args_for("report")[2] == "PII"
-    note = client.args_for("send_modmail")[2]
-    assert "degraded to flag" in note
 
 
 async def test_apply_allows_without_side_effects():

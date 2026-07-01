@@ -51,12 +51,27 @@ from nemoguardian.bot.engine import case_id
 from nemoguardian.bot.types import ModerationAction
 from nemoguardian.cascade import Cascade
 from nemoguardian.review.service import ReviewService
+from nemoguardian.schemas import VerdictLabel
 
 #: Matrix message ``msgtype`` values this adapter treats as fresh user content.
-#: ``m.notice`` is intentionally excluded so we never moderate our own
-#: enforcement notices (bot loop guard).
+#: ``m.notice`` is included: a notice from another user is real, moderatable
+#: content. The self-loop guard is by SENDER IDENTITY (skip the bot's own
+#: ``MATRIX_USER_ID``), not by excluding ``m.notice`` for everyone — otherwise
+#: any user could post as ``m.notice`` to evade moderation.
 MODERATED_MSGTYPES: frozenset[str] = frozenset(
-    {"m.text", "m.emote", "m.image", "m.file", "m.audio", "m.video"}
+    {"m.text", "m.emote", "m.notice", "m.image", "m.file", "m.audio", "m.video"}
+)
+
+#: Enforcement actions (stronger than ``flag``). When an UNSAFE verdict asks for
+#: one of these and the platform cannot perform it, we fall back to the strongest
+#: SUPPORTED enforcement (``delete``) instead of degrading all the way to ``flag``.
+ENFORCEMENT_ACTIONS: frozenset[ModerationAction] = frozenset(
+    {
+        ModerationAction.DELETE,
+        ModerationAction.TIMEOUT,
+        ModerationAction.MUTE,
+        ModerationAction.BAN,
+    }
 )
 
 #: Default power level required to redact another user's event when a room's
@@ -107,6 +122,22 @@ def _attr(obj: Any, *names: str) -> Any:
     return None
 
 
+def _resolve_content(event: Any) -> Any:
+    """Return the event ``content`` for dict *and* nio event objects.
+
+    Raw dicts carry ``content`` directly; ``matrix-nio`` event objects expose the
+    wire body under ``event.source['content']`` (there is no top-level
+    ``content`` attribute), so fall back to that.
+    """
+    content = _attr(event, "content")
+    if content is not None:
+        return content
+    source = _attr(event, "source")
+    if isinstance(source, dict):
+        return source.get("content")
+    return _attr(source, "content")
+
+
 def _resolve_room_id(event: Any, room: Any) -> str | None:
     if room is not None:
         if isinstance(room, str):
@@ -118,13 +149,20 @@ def _resolve_room_id(event: Any, room: Any) -> str | None:
     return str(room_id) if room_id else None
 
 
-def parse_matrix_event(event: Any, *, room: Any = None) -> MatrixEvent | None:
+def parse_matrix_event(
+    event: Any,
+    *,
+    room: Any = None,
+    bot_user_id: str | None = None,
+) -> MatrixEvent | None:
     """Parse a Matrix message event into a :class:`MatrixEvent`.
 
     ``room`` may be a ``MatrixRoom`` (nio), a bare room-id string, or ``None``
-    (the room id is then read from the event body). Returns ``None`` for anything
-    that is not a fresh, moderatable ``m.room.message`` (wrong type, an
-    ``m.notice`` we posted, or missing required fields). Never raises.
+    (the room id is then read from the event body). ``bot_user_id`` is the bot's
+    own ``MATRIX_USER_ID``; events sent by it are skipped (self-loop guard by
+    identity). Returns ``None`` for anything that is not a fresh, moderatable
+    ``m.room.message`` (wrong type, the bot's own event, or missing required
+    fields). ``m.notice`` from another user IS moderatable. Never raises.
     """
     if event is None:
         return None
@@ -134,7 +172,7 @@ def parse_matrix_event(event: Any, *, room: Any = None) -> MatrixEvent | None:
     if event_type is not None and event_type != "m.room.message":
         return None
 
-    content = _attr(event, "content")
+    content = _resolve_content(event)
     msgtype = _attr(content, "msgtype") or _attr(event, "msgtype")
     body = _attr(content, "body") if content is not None else None
     if body is None:
@@ -146,6 +184,9 @@ def parse_matrix_event(event: Any, *, room: Any = None) -> MatrixEvent | None:
     event_id = _attr(event, "event_id")
     sender = _attr(event, "sender")
     if not room_id or not event_id or not sender or body is None:
+        return None
+    # Self-loop guard by sender identity: never moderate the bot's own events.
+    if bot_user_id and str(sender) == str(bot_user_id):
         return None
     return MatrixEvent(
         room_id=str(room_id),
@@ -159,6 +200,41 @@ def parse_matrix_event(event: Any, *, room: Any = None) -> MatrixEvent | None:
 def matrix_decision(action: ModerationAction | str) -> ActionDecision:
     """Resolve ``action`` against Matrix capabilities (unsupported -> ``flag``)."""
     return degrade_action(action, capabilities(), Platform.MATRIX)
+
+
+def _resolve_matrix_action(
+    action: ModerationAction | str,
+    evaluation: ModerationEvaluation,
+) -> ActionDecision:
+    """Degrade ``action`` against Matrix capabilities, avoiding under-enforcement.
+
+    Generic degradation sends an unsupported action to ``flag``. But for an
+    UNSAFE verdict asking for an enforcement action the platform can't perform
+    (e.g. ``timeout``/``ban``), degrading to ``flag`` under-enforces. Fall back
+    to the strongest SUPPORTED enforcement (``delete``) instead.
+    """
+    decision = degrade_action(action, capabilities(), Platform.MATRIX)
+    if (
+        decision.degraded
+        and _is_unsafe(evaluation)
+        and decision.requested in ENFORCEMENT_ACTIONS
+        and ModerationAction.DELETE in capabilities()
+    ):
+        return ActionDecision(
+            action=ModerationAction.DELETE,
+            requested=decision.requested,
+            degraded=True,
+            reason=(
+                f"{decision.requested.value} unsupported on {Platform.MATRIX.value} "
+                f"-> escalated to {ModerationAction.DELETE.value}"
+            ),
+        )
+    return decision
+
+
+def _is_unsafe(evaluation: ModerationEvaluation) -> bool:
+    result = evaluation.result
+    return result is not None and result.verdict == VerdictLabel.UNSAFE
 
 
 def _context_from_event(event: MatrixEvent) -> ModerationContext:
@@ -209,14 +285,14 @@ async def apply_matrix_actions(
     if plan.action == ModerationAction.ALLOW:
         return "allowed", None
 
-    decision = degrade_action(plan.action, capabilities(), Platform.MATRIX)
+    decision = _resolve_matrix_action(plan.action, evaluation)
     notes: list[str] = []
     if decision.degraded:
         notes.append(decision.reason or "degraded")
         plan.action = decision.action
 
     if config.dry_run:
-        await _send_mod_notice(client, event, evaluation, applied=["dry-run"], errors=[], notes=notes)
+        # Dry-run must have no external effect: suppress the mod-room notice too.
         return "dry-run", decision.reason if decision.degraded else None
 
     applied: list[str] = []
@@ -255,13 +331,16 @@ def make_handler(
     audit_log: AuditLog | None = None,
     review_service: ReviewService | None = None,
     engine: ModerationEngine | None = None,
+    bot_user_id: str | None = None,
 ):
     """Build an async event handler that runs the full Matrix moderation flow.
 
     The returned coroutine accepts ``(event, *, client, room=None)`` where
     ``event`` is a raw ``dict`` or nio event object, ``room`` is the optional
-    ``MatrixRoom``/room-id, and ``client`` is the injectable redaction client. It
-    returns the :class:`ModerationEvaluation` (or ``None`` when the event is not a
+    ``MatrixRoom``/room-id, and ``client`` is the injectable redaction client.
+    ``bot_user_id`` is the bot's own ``MATRIX_USER_ID`` used for the self-loop
+    guard (events it sent are skipped). It returns the
+    :class:`ModerationEvaluation` (or ``None`` when the event is not a
     moderatable message) so callers/tests can introspect. Never raises.
     """
     engine = engine or ModerationEngine(
@@ -273,7 +352,7 @@ def make_handler(
     )
 
     async def on_event(event: Any, *, client: Any = None, room: Any = None) -> ModerationEvaluation | None:
-        parsed = parse_matrix_event(event, room=room)
+        parsed = parse_matrix_event(event, room=room, bot_user_id=bot_user_id)
         if parsed is None:
             return None
         config = engine.config_for(parsed.room_id)
@@ -416,6 +495,7 @@ class MatrixAdapter:
         config_store: ConfigStore | None = None,
         audit_log: AuditLog | None = None,
         review_service: ReviewService | None = None,
+        bot_user_id: str | None = None,
     ) -> None:
         self.engine = ModerationEngine(
             Platform.MATRIX,
@@ -424,7 +504,7 @@ class MatrixAdapter:
             audit_log=audit_log,
             review_service=review_service,
         )
-        self._handler = make_handler(engine=self.engine)
+        self._handler = make_handler(engine=self.engine, bot_user_id=bot_user_id)
 
     def capabilities(self) -> set[ModerationAction]:
         return capabilities()
@@ -519,7 +599,7 @@ def run_bot() -> None:  # pragma: no cover - manual entry point
     from nio import RoomMessage
 
     client = build_client(token, homeserver=homeserver, user_id=user_id)
-    handler = make_handler(review_service=ReviewService())
+    handler = make_handler(review_service=ReviewService(), bot_user_id=user_id or None)
     nio_client = _NioClient(client)
 
     async def on_message(room: Any, event: Any) -> None:
