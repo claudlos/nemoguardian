@@ -148,9 +148,36 @@ class _FakeHTTPClient:
 # --------------------------------------------------------------------------- #
 
 
-def test_offer_price_cents_rounds():
+def test_offer_price_cents_ceils():
+    # Exact whole-cent prices are unaffected (float noise is quantised away).
     assert ops.offer_price_cents(_offer(0.07)) == 7
-    assert ops.offer_price_cents(_offer(0.205)) == 20  # banker-ish rounding to nearest
+    assert ops.offer_price_cents(_offer(0.0)) == 0
+    # Anything with a sub-cent remainder rounds *up* so a cap can't be squeaked
+    # past: 20.5c -> 21c, not the old round-half 20c.
+    assert ops.offer_price_cents(_offer(0.205)) == 21
+
+
+def test_offer_just_over_cap_is_rejected():
+    # $0.5049/hr is strictly above a 50c/hr cap. Round-half admitted it (50c);
+    # ceil rejects it (51c) so nothing above the cap slips through.
+    cfg = ops.GpuOpsConfig(max_hourly_price_cents=50)
+    assert ops.offer_price_cents(_offer(0.5049)) == 51
+    check = ops.check_caps(_offer(0.5049), reserve_hours=3, config=cfg)
+    assert check.ok is False
+    assert any("exceeds cap" in r for r in check.reasons)
+
+
+async def test_provision_guarded_auto_confirms_zero_cost_offer():
+    # A $0/hr offer (e.g. on_prem) has no spend to gate, so it provisions even
+    # when confirm is False and the config still requires confirmation.
+    cfg = ops.GpuOpsConfig(require_confirm=True)
+    provider = FakeProvider()
+    result = await ops.provision_guarded(
+        provider, _offer(0.0), config=cfg, reserve_hours=3, confirm=False
+    )
+    assert result.status is ops.ProvisionStatus.PROVISIONED
+    assert result.instance is not None
+    assert len(provider.provision_calls) == 1
 
 
 def test_check_caps_accepts_within_limits():

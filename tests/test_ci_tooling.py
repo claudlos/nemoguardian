@@ -114,6 +114,23 @@ def test_secret_scan_respects_inline_allow_marker() -> None:
     assert secret_scan.scan_text(line) == []
 
 
+def test_secret_scan_bare_nosec_substring_does_not_waive() -> None:
+    # Regression: a line whose only "nosec" is the substring inside a real word
+    # (e.g. "nanoseconds") must NOT be treated as a waiver — the secret stands.
+    line = f"latency_key = '{_FAKE_AWS_KEY}'  # measured over nanoseconds"
+
+    hits = secret_scan.scan_text(line)
+
+    assert [h[1] for h in hits] == ["aws_access_key_id"]
+
+
+def test_secret_scan_marker_must_be_comment_anchored() -> None:
+    # A "nosec" that is not attached to a comment does not waive the line.
+    line = f"nosecret_lookalike = '{_FAKE_AWS_KEY}'"
+
+    assert [h[1] for h in secret_scan.scan_text(line)] == ["aws_access_key_id"]
+
+
 def test_secret_scan_files_honours_path_allowlist(tmp_path: Path) -> None:
     fixture = tmp_path / "tests" / "fixtures" / "creds.txt"
     fixture.parent.mkdir(parents=True)
@@ -125,6 +142,19 @@ def test_secret_scan_files_honours_path_allowlist(tmp_path: Path) -> None:
 
     # Only the non-fixture file is reported.
     assert [h.path for h in hits] == [leaked]
+
+
+def test_secret_scan_allowlist_is_prefix_anchored(tmp_path: Path) -> None:
+    # Regression: a path that merely *contains* an allowlist fragment mid-way
+    # (here "tests/fixtures/") must still be scanned — the allowlist is a path
+    # prefix, not a bare substring.
+    sneaky = tmp_path / "evil" / "tests" / "fixtures" / "creds.txt"
+    sneaky.parent.mkdir(parents=True)
+    sneaky.write_text(_FAKE_AWS_KEY, encoding="utf-8")
+
+    hits = secret_scan.scan_files([sneaky], root=tmp_path)
+
+    assert [h.path for h in hits] == [sneaky]
 
 
 def test_secret_scan_main_returns_nonzero_on_hit(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
