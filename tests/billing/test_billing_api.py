@@ -782,7 +782,7 @@ def test_self_hosted_provisioning_lifecycle(client):
     customer = billing_db.upsert_customer(email="self@example.com")
     billing_db.set_customer_tier(customer.id, Tier.SELF_HOSTED)
     raw, _ = billing_db.create_api_key(customer.id)
-    # Create job
+    # Create job — unconfirmed, so the guarded path returns a priced dry-run.
     r = client.post(
         "/billing/provision",
         json={"provider": "vastai"},
@@ -791,10 +791,114 @@ def test_self_hosted_provisioning_lifecycle(client):
     assert r.status_code == 200, r.text
     body = r.json()
     job_id = body["job_id"]
-    assert body["status"] in {"pending", "provisioning", "live"}
+    assert body["status"] == "planned"  # no confirm → no spend
     # Poll status
     r2 = client.get(f"/billing/jobs/{job_id}", headers={"Authorization": f"Bearer {raw}"})
     assert r2.status_code == 200
+
+
+def test_provision_planned_dry_run_when_unconfirmed(client, monkeypatch):
+    headers, _customer = _auth_headers_for_tier(
+        Tier.SELF_HOSTED, email="planned@example.com"
+    )
+    offer = Offer(ProviderName.VAST_AI, "RTX 3090", 24, 0.07, "US", offer_id="fit")
+    provider = FakeProvider([offer])
+    monkeypatch.setattr(srv, "providers_registry", lambda: FakeProviderRegistry([provider]))
+
+    r = client.post("/billing/provision", headers=headers, json={"provider": "vastai"})
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "planned"
+    assert body["instance_id"] is None
+    assert body["hourly_price_usd"] == 0.07
+    # No confirm → the provider is never called, no money spent.
+    assert provider.provision_calls == []
+
+
+def test_provision_rejects_over_cap(client, monkeypatch):
+    headers, _customer = _auth_headers_for_tier(
+        Tier.SELF_HOSTED, email="overcap@example.com"
+    )
+    # $0.60/hr is above the default $0.50/hr cap.
+    offer = Offer(ProviderName.VAST_AI, "A100 80GB", 80, 0.60, "US", offer_id="pricey")
+    provider = FakeProvider([offer])
+    monkeypatch.setattr(srv, "providers_registry", lambda: FakeProviderRegistry([provider]))
+
+    r = client.post(
+        "/billing/provision",
+        headers=headers,
+        json={"provider": "vastai", "confirm": True},
+    )
+
+    assert r.status_code == 402, r.text
+    assert r.json()["detail"]["error"] == "spend_cap_exceeded"
+    # A rejected cap never reaches the provider.
+    assert provider.provision_calls == []
+
+
+def test_provision_rejects_over_max_hours(client, monkeypatch):
+    headers, _customer = _auth_headers_for_tier(
+        Tier.SELF_HOSTED, email="overhours@example.com"
+    )
+    offer = Offer(ProviderName.VAST_AI, "RTX 3090", 24, 0.07, "US", offer_id="fit")
+    provider = FakeProvider([offer])
+    monkeypatch.setattr(srv, "providers_registry", lambda: FakeProviderRegistry([provider]))
+
+    # 100h reservation exceeds the default 12h cap.
+    r = client.post(
+        "/billing/provision",
+        headers=headers,
+        json={"provider": "vastai", "confirm": True, "reserve_hours": 100.0},
+    )
+
+    assert r.status_code == 402, r.text
+    assert r.json()["detail"]["error"] == "spend_cap_exceeded"
+    assert provider.provision_calls == []
+
+
+def test_provision_provisions_when_confirmed_and_in_cap(client, monkeypatch):
+    headers, customer = _auth_headers_for_tier(
+        Tier.SELF_HOSTED, email="confirmed@example.com"
+    )
+    offer = Offer(ProviderName.VAST_AI, "RTX 3090", 24, 0.07, "US", offer_id="fit")
+    instance = Instance(
+        provider=ProviderName.VAST_AI,
+        instance_id="vast-live",
+        gpu_model="RTX 3090",
+        vram_gb=24,
+        region="US",
+        state=InstanceState.LIVE,
+        endpoint_url="https://vast.test",
+        ssh_command="ssh root@vast.test",
+    )
+    provider = FakeProvider([offer], instance=instance)
+    monkeypatch.setattr(srv, "providers_registry", lambda: FakeProviderRegistry([provider]))
+
+    r = client.post(
+        "/billing/provision",
+        headers=headers,
+        json={
+            "provider": "vastai",
+            "confirm": True,
+            "ssh_public_key": "ssh-ed25519 AAAA test",
+            "image": "nemoguardian:test",
+        },
+    )
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "live"
+    assert body["instance_id"] == "vast-live"
+    assert body["endpoint_url"] == "https://vast.test"
+    assert len(provider.provision_calls) == 1
+    call = provider.provision_calls[0]
+    assert call["ssh_public_key"] == "ssh-ed25519 AAAA test"
+    assert call["image"] == "nemoguardian:test"
+    assert call["env"]["NEMOGUARDIAN_CUSTOMER_ID"] == str(customer.id)
+    assert call["env"]["NEMOGUARDIAN_API_KEY"].startswith("nmg_")
+    job = billing_db.get_provisioning_job(body["job_id"])
+    assert job.status == "live"
 
 
 def test_usage_endpoint_returns_allowance(client):

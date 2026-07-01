@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -18,6 +19,11 @@ if TYPE_CHECKING:
 
 # Plan actions that should land a case in the human-review queue.
 _REVIEW_ACTIONS = frozenset({ModerationAction.FLAG, ModerationAction.QUEUE})
+
+# Env var pointing at the directory that backs the default review store. When
+# ``review_queue`` is enabled but no ReviewService was injected, the engine
+# lazily builds one from this path (see ``ModerationEngine._default_review_service``).
+REVIEW_DIR_ENV = "NEMOGUARDIAN_REVIEW_DIR"
 
 
 @dataclass
@@ -131,20 +137,28 @@ class ModerationEngine:
     def enqueue_review(self, evaluation: ModerationEvaluation) -> ReviewCase | None:
         """Enqueue a controversial / flagged case for human review (audit #26).
 
-        No-op unless a :class:`~nemoguardian.review.service.ReviewService` is wired
-        in *and* the workspace config opts in (``review_queue``). Only cases that
-        actually need a human — a CONTROVERSIAL verdict or a FLAG/QUEUE action —
-        are enqueued; safe and clear-unsafe verdicts (auto-actioned) are not.
+        No-op unless the workspace config opts in (``review_queue``) *and* a review
+        store is available. The store is either the :class:`ReviewService` injected
+        at construction or — when ``review_queue`` is on and none was injected — a
+        default one built lazily from ``NEMOGUARDIAN_REVIEW_DIR`` (see
+        :meth:`_default_review_service`). This lets the queue fire on the live
+        adapter paths without every adapter having to wire a service in. When the
+        config opts out *or* no directory is configured the method stays a no-op,
+        so existing deployments are unaffected.
+
+        Only cases that actually need a human — a CONTROVERSIAL verdict or a
+        FLAG/QUEUE action — are enqueued; safe and clear-unsafe verdicts
+        (auto-actioned) are not.
 
         The raw message is handed to the review store, which redacts it into an
         excerpt + hash — raw text is never persisted here. Fail-safe: any error is
         swallowed so review bookkeeping can never break the moderation path. The
         review case id mirrors the audit ``case_id`` so re-recording is idempotent.
         """
-        service = self.review_service
-        if service is None:
-            return None
         if not getattr(evaluation.config, "review_queue", False):
+            return None
+        service = self.review_service or self._default_review_service()
+        if service is None:
             return None
         if not needs_review(evaluation):
             return None
@@ -168,6 +182,26 @@ class ModerationEngine:
             )
         except Exception:
             # Review enqueue is best-effort; never let it break moderation.
+            return None
+
+    @staticmethod
+    def _default_review_service() -> ReviewService | None:
+        """Lazily build the default review store from ``NEMOGUARDIAN_REVIEW_DIR``.
+
+        Returns ``None`` (a no-op) when the env var is unset or the store cannot be
+        constructed, so an unconfigured or misconfigured review directory can never
+        break moderation. Constructed fresh each call: the underlying append-only
+        JSONL stores do no I/O until a case is written, so this stays cheap and
+        stays in sync with the current environment.
+        """
+        review_dir = os.environ.get(REVIEW_DIR_ENV)
+        if not review_dir:
+            return None
+        try:
+            from nemoguardian.review.service import ReviewService
+
+            return ReviewService.from_dir(review_dir)
+        except Exception:
             return None
 
     @staticmethod

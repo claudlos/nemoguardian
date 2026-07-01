@@ -105,6 +105,16 @@ class CreateKeyResponse(BaseModel):
 class ProvisioningRequest(BaseModel):
     provider: Literal["vastai", "digitalocean", "lambda", "on_prem"] = "vastai"
     ssh_public_key: str | None = None
+    image: str = "nemoguardian/self-hosted:latest"
+    # Guarded-provisioning controls (audit #45). ``confirm`` is the no-auto-spend
+    # gate: without it the endpoint returns a priced dry-run ("planned") and spends
+    # nothing. The caps (max hourly price / max reserve hours) are enforced server
+    # side regardless.
+    confirm: bool = False
+    reserve_hours: float = Field(default=3.0, ge=0.25, le=168.0)
+    gpu_model: str | None = None
+    max_price_usd: float | None = None
+    offer_id: str | None = None
 
 
 class ProvisioningResponse(BaseModel):
