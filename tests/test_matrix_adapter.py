@@ -176,7 +176,7 @@ def test_parse_room_id_override_from_room():
     "event",
     [
         {"type": "m.room.redaction", "room_id": "!r:hs", "sender": "@u:hs", "event_id": "$e"},
-        _event("our own notice", msgtype="m.notice"),
+        _event("weird type", msgtype="m.location"),
         {"type": "m.room.message", "sender": "@u:hs", "event_id": "$e", "content": {"body": "no room"}},
         {"type": "m.room.message", "room_id": "!r:hs", "event_id": "$e", "content": {"body": "no sender"}},
         None,
@@ -184,6 +184,45 @@ def test_parse_room_id_override_from_room():
 )
 def test_parse_skips_non_moderatable_events(event):
     assert matrix.parse_matrix_event(event) is None
+
+
+def test_parse_moderates_notice_from_other_user():
+    # m.notice from another user is real content, not a bot loop — moderate it.
+    parsed = matrix.parse_matrix_event(_event("evasion attempt", msgtype="m.notice"))
+    assert parsed is not None
+    assert parsed.msgtype == "m.notice"
+    assert parsed.body == "evasion attempt"
+
+
+def test_parse_skips_bot_own_event_by_sender_id():
+    # The self-loop guard is by identity: the bot's own event is skipped even
+    # when it is a normal m.text message (not just m.notice).
+    event = _event("bot posted this", sender="@bot:hs", msgtype="m.text")
+    assert matrix.parse_matrix_event(event, bot_user_id="@bot:hs") is None
+    # a different sender with the same content is still moderated
+    assert matrix.parse_matrix_event(event, bot_user_id="@someoneelse:hs") is not None
+
+
+def test_parse_reads_notice_msgtype_from_nio_source():
+    # nio event objects keep msgtype under source['content']; a bot notice there
+    # is still skipped by sender identity, while another user's notice is kept.
+    nio_notice = SimpleNamespace(
+        event_id="$e1",
+        sender="@bot:hs",
+        body="enforcement notice",
+        source={"content": {"msgtype": "m.notice", "body": "enforcement notice"}},
+    )
+    room = SimpleNamespace(room_id="!r:hs")
+    assert matrix.parse_matrix_event(nio_notice, room=room, bot_user_id="@bot:hs") is None
+    other = SimpleNamespace(
+        event_id="$e2",
+        sender="@u:hs",
+        body="sneaky notice",
+        source={"content": {"msgtype": "m.notice", "body": "sneaky notice"}},
+    )
+    parsed = matrix.parse_matrix_event(other, room=room, bot_user_id="@bot:hs")
+    assert parsed is not None
+    assert parsed.msgtype == "m.notice"
 
 
 # --- capabilities & planning --------------------------------------------
@@ -270,13 +309,36 @@ async def test_handler_dry_run_plans_without_enforcing(tmp_path):
         audit_log=audit_log,
     )(_event("drop your SSN"), client=client)
 
-    assert "redact_message" not in client.names()
-    # only the mod-room notice happens in dry-run
-    assert client.names() == ["send_notice"]
-    assert "applied: dry-run" in client.args_for("send_notice")[1]
+    # dry-run means no external effect: not even the mod-room notice is sent.
+    assert client.calls == []
     record = audit_log.recent()[0]
     assert record["execution_status"] == "dry-run"
     assert record["dry_run"] is True
+
+
+async def test_handler_skips_bot_own_event_but_moderates_others(tmp_path):
+    config_store, audit_log = _stores(tmp_path)
+    config = BotConfig.default(Platform.MATRIX, "!r:hs")
+    config.log_channel_id = "!mods:hs"
+    config_store.save(config)
+    cascade = FakeCascade(VerdictLabel.UNSAFE, categories=["PII"])
+    handler = matrix.make_handler(
+        cascade,
+        config_store=config_store,
+        audit_log=audit_log,
+        bot_user_id="@bot:hs",
+    )
+
+    # bot's own event (even m.notice) is skipped before the cascade runs
+    client = FakeMatrixClient()
+    assert await handler(_event("my own notice", sender="@bot:hs", msgtype="m.notice"), client=client) is None
+    assert cascade.calls == []
+    assert client.calls == []
+
+    # another user's m.notice IS moderated
+    result = await handler(_event("evasion", sender="@evil:hs", msgtype="m.notice"), client=client)
+    assert result is not None
+    assert "redact_message" in client.names()
 
 
 async def test_handler_async_client_is_awaited(tmp_path):
@@ -299,7 +361,9 @@ async def test_handler_async_client_is_awaited(tmp_path):
 # --- apply / degradation -------------------------------------------------
 
 
-async def test_apply_degrades_unsupported_ban_to_flag(tmp_path):
+async def test_apply_escalates_unsupported_enforcement_to_delete(tmp_path):
+    # An UNSAFE verdict asking for BAN (unsupported) must not under-enforce to a
+    # bare flag: it falls back to the strongest supported enforcement (redact).
     config = BotConfig.default(Platform.MATRIX, "!r:hs")
     config.log_channel_id = "!mods:hs"
     client = FakeMatrixClient()
@@ -308,12 +372,42 @@ async def test_apply_degrades_unsupported_ban_to_flag(tmp_path):
     status, error = await matrix.apply_matrix_actions(client, event, evaluation)
 
     assert error is None
+    assert status == "redact+notify_mods"
+    assert evaluation.plan.action == ModerationAction.DELETE
+    assert "redact_message" in client.names()
+    notice = client.args_for("send_notice")[1]
+    assert "escalated to delete" in notice
+    assert "action: delete" in notice
+
+
+async def test_apply_escalates_timeout_to_delete_not_flag(tmp_path):
+    config = BotConfig.default(Platform.MATRIX, "!r:hs")
+    config.log_channel_id = "!mods:hs"
+    client = FakeMatrixClient()
+    event, evaluation = _evaluation(config=config, action=ModerationAction.TIMEOUT)
+
+    status, error = await matrix.apply_matrix_actions(client, event, evaluation)
+
+    assert error is None
+    assert status == "redact+notify_mods"
+    assert evaluation.plan.action == ModerationAction.DELETE
+    assert "redact_message" in client.names()
+
+
+async def test_apply_degrades_to_flag_when_verdict_not_unsafe(tmp_path):
+    # Escalation is gated on an UNSAFE verdict; a controversial item still just
+    # flags for a genuinely unsupported action.
+    config = BotConfig.default(Platform.MATRIX, "!r:hs")
+    config.log_channel_id = "!mods:hs"
+    client = FakeMatrixClient()
+    event, evaluation = _evaluation(config=config, action=ModerationAction.TIMEOUT)
+    evaluation.result.verdict = VerdictLabel.CONTROVERSIAL
+
+    status, _error = await matrix.apply_matrix_actions(client, event, evaluation)
+
     assert status == "flag+notify_mods"
     assert evaluation.plan.action == ModerationAction.FLAG
     assert "redact_message" not in client.names()
-    notice = client.args_for("send_notice")[1]
-    assert "degraded to flag" in notice
-    assert "action: flag" in notice
 
 
 async def test_apply_allows_without_side_effects():
