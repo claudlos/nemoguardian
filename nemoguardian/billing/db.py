@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS api_keys (
     label           TEXT,
     created_at      TEXT NOT NULL,
     last_used_at    TEXT,
-    revoked         INTEGER NOT NULL DEFAULT 0
+    revoked         INTEGER NOT NULL DEFAULT 0,
+    scope           TEXT NOT NULL DEFAULT 'full'   -- 'full' | 'instance' (moderation-only)
 );
 
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
@@ -89,6 +90,7 @@ CREATE TABLE IF NOT EXISTS provisioning_jobs (
     endpoint_url    TEXT,
     ssh_command     TEXT,
     error_message   TEXT,
+    api_key_id      INTEGER REFERENCES api_keys(id),  -- instance-scoped key injected into the VM
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
@@ -134,7 +136,22 @@ def init_db(path: Path | str | None = None) -> sqlite3.Connection:
                 "PRAGMA busy_timeout = 5000;"
             )
             _conn.executescript(SCHEMA)
+            _migrate(_conn)
         return _conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Idempotent column additions for DBs created before these fields existed."""
+
+    def columns(table: str) -> set[str]:
+        return {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+    if "scope" not in columns("api_keys"):
+        conn.execute("ALTER TABLE api_keys ADD COLUMN scope TEXT NOT NULL DEFAULT 'full'")
+    if "api_key_id" not in columns("provisioning_jobs"):
+        conn.execute(
+            "ALTER TABLE provisioning_jobs ADD COLUMN api_key_id INTEGER REFERENCES api_keys(id)"
+        )
 
 
 @contextmanager
@@ -261,6 +278,7 @@ class ApiKey:
     created_at: str
     last_used_at: str | None
     revoked: bool
+    scope: str = "full"  # 'full' | 'instance' (moderation-only)
 
 
 def _generate_raw_key() -> tuple[str, str]:
@@ -269,29 +287,36 @@ def _generate_raw_key() -> tuple[str, str]:
     return raw, _hash_key(raw)
 
 
-def create_api_key(customer_id: int, label: str | None = None) -> tuple[str, ApiKey]:
+def create_api_key(
+    customer_id: int, label: str | None = None, *, scope: str = "full"
+) -> tuple[str, ApiKey]:
     """Create a new API key for the customer. Returns (raw_key, record).
 
     The raw key is shown to the user ONCE. Only the hash is stored.
+    ``scope='instance'`` keys are moderation-only credentials minted for
+    provisioned VMs (NMG-009); they don't count against the tier's key quota.
     """
+    if scope not in {"full", "instance"}:
+        raise ValueError(f"unknown API key scope {scope!r}")
     conn = init_db()
     customer = get_customer(customer_id)
     plan = customer.plan
-    active_count = conn.execute(
-        "SELECT COUNT(*) AS n FROM api_keys WHERE customer_id = ? AND revoked = 0",
-        (customer_id,),
-    ).fetchone()["n"]
-    if active_count >= plan.max_api_keys:
-        raise ValueError(
-            f"max API keys for tier {plan.tier.value} reached ({plan.max_api_keys})"
-        )
+    if scope == "full":
+        active_count = conn.execute(
+            "SELECT COUNT(*) AS n FROM api_keys WHERE customer_id = ? AND revoked = 0 AND scope = 'full'",
+            (customer_id,),
+        ).fetchone()["n"]
+        if active_count >= plan.max_api_keys:
+            raise ValueError(
+                f"max API keys for tier {plan.tier.value} reached ({plan.max_api_keys})"
+            )
     raw, h = _generate_raw_key()
     now = _now()
     with _tx(conn):
         cur = conn.execute(
-            """INSERT INTO api_keys (customer_id, key_hash, label, created_at)
-               VALUES (?, ?, ?, ?)""",
-            (customer_id, h, label, now),
+            """INSERT INTO api_keys (customer_id, key_hash, label, created_at, scope)
+               VALUES (?, ?, ?, ?, ?)""",
+            (customer_id, h, label, now, scope),
         )
         key_id = cur.lastrowid
     return raw, ApiKey(
@@ -301,24 +326,53 @@ def create_api_key(customer_id: int, label: str | None = None) -> tuple[str, Api
         created_at=now,
         last_used_at=None,
         revoked=False,
+        scope=scope,
     )
 
 
-def lookup_customer_by_api_key(raw_key: str) -> Customer | None:
-    """Resolve a raw API key to a customer, or None if invalid/revoked."""
+def lookup_api_key(raw_key: str) -> tuple[Customer, ApiKey] | None:
+    """Resolve a raw API key to (customer, key record). Read-only — no side effects."""
     conn = init_db()
     h = _hash_key(raw_key)
     row = conn.execute(
-        """SELECT c.* FROM customers c
+        """SELECT c.*,
+                  k.id AS k_id, k.label AS k_label, k.created_at AS k_created_at,
+                  k.last_used_at AS k_last_used_at, k.revoked AS k_revoked,
+                  k.scope AS k_scope
+           FROM customers c
            JOIN api_keys k ON k.customer_id = c.id
            WHERE k.key_hash = ? AND k.revoked = 0""",
         (h,),
     ).fetchone()
     if row is None:
         return None
-    # Touch last_used_at (best-effort, no tx needed)
-    conn.execute("UPDATE api_keys SET last_used_at = ? WHERE key_hash = ?", (_now(), h))
-    return Customer(**dict(row))
+    d = dict(row)
+    key = ApiKey(
+        id=d.pop("k_id"),
+        customer_id=d["id"],
+        label=d.pop("k_label"),
+        created_at=d.pop("k_created_at"),
+        last_used_at=d.pop("k_last_used_at"),
+        revoked=bool(d.pop("k_revoked")),
+        scope=d.pop("k_scope"),
+    )
+    return Customer(**d), key
+
+
+def touch_api_key(key_id: int) -> None:
+    """Update last_used_at. Callers throttle this — it's a write per request otherwise."""
+    conn = init_db()
+    conn.execute("UPDATE api_keys SET last_used_at = ? WHERE id = ?", (_now(), key_id))
+
+
+def lookup_customer_by_api_key(raw_key: str) -> Customer | None:
+    """Resolve a raw API key to a customer, or None if invalid/revoked."""
+    found = lookup_api_key(raw_key)
+    if found is None:
+        return None
+    customer, key = found
+    touch_api_key(key.id)
+    return customer
 
 
 def revoke_api_key(customer_id: int, key_id: int) -> None:
@@ -334,7 +388,7 @@ def list_api_keys(customer_id: int) -> list[ApiKey]:
     # Name the columns explicitly so the row maps 1:1 onto the ApiKey dataclass
     # (which deliberately omits key_hash — keys are hash-only at rest).
     rows = conn.execute(
-        """SELECT id, customer_id, label, created_at, last_used_at, revoked
+        """SELECT id, customer_id, label, created_at, last_used_at, revoked, scope
            FROM api_keys WHERE customer_id = ? ORDER BY id DESC""",
         (customer_id,),
     ).fetchall()
@@ -468,6 +522,7 @@ class ProvisioningJob:
     error_message: str | None
     created_at: str
     updated_at: str
+    api_key_id: int | None = None  # instance-scoped key injected into the VM
 
 
 def create_provisioning_job(
@@ -500,9 +555,13 @@ def update_provisioning_job(
     endpoint_url: str | None = None,
     ssh_command: str | None = None,
     error_message: str | None = None,
+    api_key_id: int | None = None,
 ) -> None:
     conn = init_db()
     fields, values = [], []
+    if api_key_id is not None:
+        fields.append("api_key_id = ?")
+        values.append(api_key_id)
     if status is not None:
         fields.append("status = ?")
         values.append(status)
@@ -552,10 +611,12 @@ __all__ = [
     "init_db",
     "list_api_keys",
     "list_provisioning_jobs",
+    "lookup_api_key",
     "lookup_customer_by_api_key",
     "record_usage",
     "revoke_api_key",
     "set_customer_tier",
+    "touch_api_key",
     "update_provisioning_job",
     "upsert_customer",
     "upsert_subscription",

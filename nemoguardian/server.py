@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import math
 import os
 from pathlib import Path
 from typing import Annotated, ClassVar
@@ -45,6 +46,7 @@ from nemoguardian.providers import (
 )
 from nemoguardian.providers.base import CASCADE_VRAM_COMFORT_GB, ProvisionError
 from nemoguardian.providers.registry import get_registry as providers_registry
+from nemoguardian.ratelimit import RateLimiter
 from nemoguardian.schemas import (
     HealthResponse,
     ModerateRequest,
@@ -53,6 +55,28 @@ from nemoguardian.schemas import (
 )
 
 logger = structlog.get_logger("nemoguardian.server")
+
+# --- Rate limiting (NMG-011) ------------------------------------------------
+
+_rate_limiter = RateLimiter()
+
+
+def _enforce_rate_limit(bucket_key: str) -> None:
+    """Raise 429 (with Retry-After) when the caller's bucket is exhausted."""
+    allowed, retry_after = _rate_limiter.check(bucket_key)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "rate limit exceeded",
+                "retry_after_seconds": math.ceil(retry_after),
+            },
+            headers={"Retry-After": str(math.ceil(retry_after))},
+        )
+
+
+def _rate_key_for(auth: billing_auth.AuthContext) -> str:
+    return f"key:{auth.key_id}" if auth.key_id is not None else "env-bootstrap"
 
 
 # --- Singleton wiring -----------------------------------------------------
@@ -151,8 +175,9 @@ async def moderate(
 ) -> ModerateResponse:
     # Enforce tier limits + features
     billing_auth.enforce_feature(auth, f"cascade.{request.mode.value}")
+    _enforce_rate_limit(_rate_key_for(auth))
 
-    allowed, usage = billing_metered.check_allowance(auth.customer.id)
+    allowed, usage = await asyncio.to_thread(billing_metered.check_allowance, auth.customer.id)
     if not allowed:
         raise HTTPException(
             status_code=429,
@@ -171,7 +196,9 @@ async def moderate(
         error_label="moderation_failed",
     )
 
-    billing_metered.report_usage(
+    # Sync SQLite + (when configured) sync Stripe HTTP — keep off the event loop.
+    await asyncio.to_thread(
+        billing_metered.report_usage,
         auth.customer.id,
         call_type=request.mode.value,
         request_id=result.request_id,
@@ -183,12 +210,17 @@ async def moderate(
 @app.post("/demo/moderate", response_model=ModerateResponse)
 async def demo_moderate(
     request: ModerateRequest,
+    http_request: Request,
     policy_preset: Annotated[str | None, Query(description="Built-in policy preset")] = "discord",
     policy_yaml: Annotated[str | None, Query(description="Inline YAML policy")] = None,
 ) -> ModerateResponse:
     """Hackathon demo endpoint: real cascade, no billing/auth wrapper."""
     if not _demo_endpoint_enabled():
         raise HTTPException(404, "demo endpoint disabled")
+
+    # No auth on this route — bucket unauthenticated callers by client IP.
+    client_host = http_request.client.host if http_request.client else "unknown"
+    _enforce_rate_limit(f"ip:{client_host}")
 
     return await _run_moderation(
         request,
@@ -208,8 +240,9 @@ async def moderate_stream(
     Returns newline-delimited JSON (NDJSON).
     """
     billing_auth.enforce_feature(auth, "cascade.stream")
+    _enforce_rate_limit(_rate_key_for(auth))
 
-    allowed, usage = billing_metered.check_allowance(auth.customer.id)
+    allowed, usage = await asyncio.to_thread(billing_metered.check_allowance, auth.customer.id)
     if not allowed:
         raise HTTPException(
             status_code=429,
@@ -273,7 +306,8 @@ async def moderate_stream(
             # Bill only for work actually delivered (any tokens streamed),
             # including partially-streamed requests that then errored.
             if emitted_tokens:
-                billing_metered.report_usage(
+                await asyncio.to_thread(
+                    billing_metered.report_usage,
                     auth.customer.id,
                     call_type="stream",
                     request_id=request_id,
@@ -381,7 +415,7 @@ async def billing_webhook_endpoint(request: Request) -> dict:
 @app.post("/billing/portal", response_model=PortalResponse)
 async def billing_portal_endpoint(
     req: PortalRequest,
-    auth: billing_auth.AuthContext = Depends(billing_auth.require_api_key),
+    auth: billing_auth.AuthContext = Depends(billing_auth.require_full_scope),
 ) -> PortalResponse:
     """Create a Stripe customer-portal session for plan changes and cancellation."""
     session = billing_checkout.create_portal_session(
@@ -398,10 +432,13 @@ async def billing_portal_endpoint(
 @app.post("/billing/keys", response_model=CreateKeyResponse)
 async def billing_create_key(
     req: CreateKeyRequest,
-    auth: billing_auth.AuthContext = Depends(billing_auth.require_api_key),
+    auth: billing_auth.AuthContext = Depends(billing_auth.require_full_scope),
 ) -> CreateKeyResponse:
     """Provision a new API key for the authenticated customer."""
-    raw, _record = billing_db.create_api_key(auth.customer.id, label=req.label)
+    _enforce_rate_limit(_rate_key_for(auth))
+    raw, _record = await asyncio.to_thread(
+        billing_db.create_api_key, auth.customer.id, req.label
+    )
     return CreateKeyResponse(
         api_key=raw,
         label=req.label,
@@ -431,7 +468,7 @@ async def billing_usage(
 @app.post("/billing/provision", response_model=ProvisioningResponse)
 async def billing_provision(
     req: ProvisioningRequest,
-    auth: billing_auth.AuthContext = Depends(billing_auth.require_api_key),
+    auth: billing_auth.AuthContext = Depends(billing_auth.require_full_scope),
 ) -> ProvisioningResponse:
     """Self-hosted tier: spin up a nemoguardian instance for this customer."""
     if "deploy.self_hosted" not in auth.plan.features:
@@ -530,13 +567,24 @@ async def providers_offers(
     }
 
 
-def _provision_env(auth: billing_auth.AuthContext) -> dict[str, str]:
-    """Environment injected into a provisioned self-hosted instance."""
-    return {
-        "NEMOGUARDIAN_API_KEY": auth.raw_key,
+def _mint_instance_env(auth: billing_auth.AuthContext) -> tuple[dict[str, str], int]:
+    """Environment injected into a provisioned self-hosted instance.
+
+    NMG-009: mint a moderation-only instance-scoped key for the VM instead of
+    forwarding the caller's master key. Returns (env, instance_key_id) so the
+    key can be tied to the job (and revoked on failure/teardown).
+    """
+    raw, record = billing_db.create_api_key(
+        auth.customer.id,
+        label=f"instance key for customer {auth.customer.id}",
+        scope="instance",
+    )
+    env = {
+        "NEMOGUARDIAN_API_KEY": raw,
         "STRIPE_CUSTOMER_ID": auth.customer.stripe_customer_id or "",
         "NEMOGUARDIAN_CUSTOMER_ID": str(auth.customer.id),
     }
+    return env, record.id
 
 
 def _require_self_hosted(auth: billing_auth.AuthContext) -> None:
@@ -549,7 +597,11 @@ def _require_self_hosted(auth: billing_auth.AuthContext) -> None:
 
 
 def _persist_provision_response(
-    auth: billing_auth.AuthContext, provider_name: str, instance
+    auth: billing_auth.AuthContext,
+    provider_name: str,
+    instance,
+    *,
+    api_key_id: int | None = None,
 ) -> ProvisioningResponse:
     """Persist a provisioning job for the instance and build the API response."""
     status = "live" if instance.state.value == "live" else "provisioning"
@@ -564,6 +616,7 @@ def _persist_provision_response(
         instance_id=instance.instance_id,
         endpoint_url=instance.endpoint_url,
         ssh_command=instance.ssh_command,
+        api_key_id=api_key_id,
     )
     return ProvisioningResponse(
         job_id=job.id,
@@ -576,7 +629,7 @@ def _persist_provision_response(
 
 @app.post("/billing/provision/cheapest")
 async def billing_provision_cheapest(
-    auth: billing_auth.AuthContext = Depends(billing_auth.require_api_key),
+    auth: billing_auth.AuthContext = Depends(billing_auth.require_full_scope),
     ssh_public_key: Annotated[str | None, Body()] = None,
     image: Annotated[str, Body()] = "nemoguardian/self-hosted:latest",
     max_price_usd: Annotated[float | None, Body()] = None,
@@ -586,24 +639,32 @@ async def billing_provision_cheapest(
     This is the headline demo endpoint: "give me the cheapest GPU that fits."
     """
     _require_self_hosted(auth)
+    env, instance_key_id = await asyncio.to_thread(_mint_instance_env, auth)
     try:
         offer, instance = await provision_cheapest_fit(
             ssh_public_key=billing_provisioning.validate_ssh_public_key(ssh_public_key),
             image=image,
-            env=_provision_env(auth),
+            env=env,
             max_price_usd=max_price_usd,
         )
     except Exception as exc:
+        # Don't leave an orphaned live credential behind a failed provision.
+        await asyncio.to_thread(billing_db.revoke_api_key, auth.customer.id, instance_key_id)
         raise _client_error(502, what="provisioning_failed", exc=exc) from exc
 
     # Persist the job so the customer can poll status.
-    return _persist_provision_response(auth, ProviderName(offer.provider.value).value, instance)
+    return _persist_provision_response(
+        auth,
+        ProviderName(offer.provider.value).value,
+        instance,
+        api_key_id=instance_key_id,
+    )
 
 
 @app.post("/billing/provision/{provider_name}")
 async def billing_provision_specific(
     provider_name: str,
-    auth: billing_auth.AuthContext = Depends(billing_auth.require_api_key),
+    auth: billing_auth.AuthContext = Depends(billing_auth.require_full_scope),
     offer_id: Annotated[str | None, Body()] = None,
     gpu_model: Annotated[str | None, Body()] = None,
     max_price_usd: Annotated[float | None, Body()] = None,
@@ -626,17 +687,20 @@ async def billing_provision_specific(
         raise HTTPException(404, f"no fitting offers on {provider_name} for that filter")
     offer = next((o for o in fits if o.offer_id == offer_id), fits[0])
 
+    env, instance_key_id = await asyncio.to_thread(_mint_instance_env, auth)
     try:
         instance = await provider.provision(
             offer,
             ssh_public_key=billing_provisioning.validate_ssh_public_key(ssh_public_key),
             image=image,
-            env=_provision_env(auth),
+            env=env,
         )
     except ProvisionError as exc:
+        # Don't leave an orphaned live credential behind a failed provision.
+        await asyncio.to_thread(billing_db.revoke_api_key, auth.customer.id, instance_key_id)
         raise _client_error(502, what=f"{provider_name}_provisioning_failed", exc=exc) from exc
 
-    return _persist_provision_response(auth, provider_name, instance)
+    return _persist_provision_response(auth, provider_name, instance, api_key_id=instance_key_id)
 
 
 # --- Demo UI --------------------------------------------------------------

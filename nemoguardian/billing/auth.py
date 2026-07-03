@@ -6,14 +6,20 @@ header resolves to a Customer, which the handler uses to enforce tier limits.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
-from fastapi import Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 
 from nemoguardian.billing import db
 from nemoguardian.billing.plans import Plan, Tier, get_plan
+
+# Persist last_used_at at most once per key per this interval — it's a write
+# behind a global SQLite lock on every request otherwise.
+_TOUCH_INTERVAL = timedelta(seconds=60)
 
 _PLACEHOLDER_ENV_KEYS = {
     "",
@@ -31,6 +37,8 @@ class AuthContext:
     customer: db.Customer
     plan: Plan
     raw_key: str
+    key_id: int | None = None  # None for the env-bootstrap key
+    scope: str = "full"  # 'full' | 'instance' (moderation-only)
 
 
 async def require_api_key(
@@ -54,15 +62,55 @@ async def require_api_key(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="API key must start with 'nmg_'",
         )
-    customer = db.lookup_customer_by_api_key(raw_key)
-    if customer is None:
-        customer = _lookup_env_bootstrap_customer(raw_key)
+    # Sync SQLite lookups run off the event loop.
+    found = await asyncio.to_thread(db.lookup_api_key, raw_key)
+    if found is not None:
+        customer, key = found
+        if _touch_due(key.last_used_at):
+            await asyncio.to_thread(db.touch_api_key, key.id)
+        return AuthContext(
+            customer=customer,
+            plan=get_plan(customer.tier_enum),
+            raw_key=raw_key,
+            key_id=key.id,
+            scope=key.scope,
+        )
+
+    customer = await asyncio.to_thread(_lookup_env_bootstrap_customer, raw_key)
     if customer is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid or revoked API key",
         )
     return AuthContext(customer=customer, plan=get_plan(customer.tier_enum), raw_key=raw_key)
+
+
+def _touch_due(last_used_at: str | None) -> bool:
+    if not last_used_at:
+        return True
+    try:
+        last = datetime.fromisoformat(last_used_at)
+    except ValueError:
+        return True
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - last >= _TOUCH_INTERVAL
+
+
+def require_full_scope(
+    auth: Annotated[AuthContext, Depends(require_api_key)],
+) -> AuthContext:
+    """Dependency for billing/key/provisioning routes (NMG-009).
+
+    Instance-scoped keys (minted for provisioned VMs) can moderate but must not
+    manage keys, billing, or spin up further instances.
+    """
+    if auth.scope != "full":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="this API key is instance-scoped (moderation only)",
+        )
+    return auth
 
 
 def enforce_feature(auth: AuthContext, feature: str) -> None:
@@ -111,4 +159,4 @@ def _env_tier() -> Tier:
         return Tier.SELF_HOSTED
 
 
-__all__ = ["AuthContext", "enforce_feature", "require_api_key"]
+__all__ = ["AuthContext", "enforce_feature", "require_api_key", "require_full_scope"]
