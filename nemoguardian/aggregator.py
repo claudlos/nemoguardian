@@ -15,13 +15,24 @@ Aggregation: weighted mean of scores → threshold → label.
 
 If ANY contributing model returned verdict=unsafe with score ≥ 0.50, we override
 the weighted mean and label unsafe (fail-closed on hard violations).
+
+Failure contract: errored verdicts are excluded from aggregation. If NO model
+produced a usable verdict (every model errored, or the caller ran none), the
+result follows ``fail_mode``: "closed" (default) → unsafe, "open" → safe.
+Configure via NEMOGUARDIAN_FAIL_MODE.
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 
 from nemoguardian.schemas import ModelVerdict, VerdictLabel
+
+
+def _fail_mode_from_env() -> str:
+    raw = os.environ.get("NEMOGUARDIAN_FAIL_MODE", "closed").strip().lower()
+    return raw if raw in {"closed", "open"} else "closed"
 
 
 @dataclass
@@ -33,6 +44,7 @@ class AggregatorConfig:
     safe_threshold: float = 0.30
     unsafe_threshold: float = 0.70
     override_on_unsafe: float = 0.50  # any model over this → unsafe regardless
+    fail_mode: str = field(default_factory=_fail_mode_from_env)  # "closed" | "open"
 
 
 @dataclass
@@ -95,20 +107,21 @@ def aggregate(
             if snippet:
                 reasons.append(f"[{label}] {snippet}")
 
-    if verdicts and weighted_total == 0:
-        # Models WERE run but every vote was errored/dropped (e.g. reasoning
-        # models that truncated before emitting a label). Fail safe-by-design:
-        # escalate to CONTROVERSIAL rather than silently returning "safe" (which
-        # is what an empty weighted mean does). An empty ``verdicts`` dict is a
-        # deliberate caller opt-out (all model toggles off) and is left as-is.
-        reasons.append(
-            "[NemoGuardian] No model produced a usable verdict — escalating to controversial."
-        )
+    if weighted_total == 0 and not override_to_unsafe:
+        # No usable verdict: every model errored, or the caller ran none.
+        # (A hard unsafe override always carries weight, so it can't reach here —
+        # but guard on it anyway so an explicit unsafe vote is never downgraded
+        # to safe by a fail-open return.)
+        # Follow the configured fail mode instead of silently returning "safe"
+        # (which is what an empty weighted mean would do).
+        if cfg.fail_mode == "open":
+            reasons.append("[NemoGuardian] No usable verdict; fail-open → safe.")
+            return AggregatedVerdict(
+                verdict=VerdictLabel.SAFE, score=0.0, reasons=reasons[:6], categories=[]
+            )
+        reasons.append("[NemoGuardian] No usable verdict; fail-closed → unsafe.")
         return AggregatedVerdict(
-            verdict=VerdictLabel.CONTROVERSIAL,
-            score=0.5,
-            reasons=reasons[:6],
-            categories=[],
+            verdict=VerdictLabel.UNSAFE, score=1.0, reasons=reasons[:6], categories=[]
         )
 
     if weighted_total > 0:

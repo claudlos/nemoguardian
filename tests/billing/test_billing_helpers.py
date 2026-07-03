@@ -282,7 +282,41 @@ def test_portal_uses_stripe_when_customer_has_stripe_id(monkeypatch):
     }
 
 
+def test_report_usage_prefers_meter_event(monkeypatch):
+    """New Stripe API: billing.MeterEvent replaces the legacy usage record."""
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test")
+    monkeypatch.setenv("STRIPE_METER_EVENT_NAME", "nemoguardian_calls")
+    customer = db.upsert_customer(email="meter@example.com", stripe_customer_id="cus_meter")
+    created: list[dict] = []
+
+    class FakeMeterEvent:
+        @staticmethod
+        def create(**kwargs):
+            created.append(kwargs)
+
+    class FakeSubscription:
+        @staticmethod
+        def list(**kwargs):  # legacy path must NOT be taken
+            raise AssertionError("legacy Subscription.list used despite MeterEvent")
+
+    _install_stripe(
+        monkeypatch,
+        SimpleNamespace(
+            billing=SimpleNamespace(MeterEvent=FakeMeterEvent),
+            Subscription=FakeSubscription,
+        ),
+    )
+
+    metered.report_usage(customer.id, call_type="deep", units=3)
+
+    assert len(created) == 1
+    assert created[0]["event_name"] == "nemoguardian_calls"
+    assert created[0]["payload"]["stripe_customer_id"] == "cus_meter"
+    assert created[0]["payload"]["value"] == "3"
+
+
 def test_report_usage_pushes_metered_usage_record(monkeypatch):
+    monkeypatch.delenv("STRIPE_METER_EVENT_NAME", raising=False)
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test")
     customer = db.upsert_customer(email="usage@example.com", stripe_customer_id="cus_usage")
     calls: dict[str, object] = {}

@@ -908,6 +908,86 @@ def test_provision_provisions_when_confirmed_and_in_cap(client, monkeypatch):
     assert billing_db.gpu_credit_balance_cents(customer.id) == 979
 
 
+def test_instance_scoped_key_can_moderate_but_not_manage(client):
+    """NMG-009: an instance-scoped key moderates but is 403 on management routes."""
+    customer = billing_db.upsert_customer(email="instkey@example.com")
+    billing_db.set_customer_tier(customer.id, Tier.SELF_HOSTED)
+    raw_instance, _ = billing_db.create_api_key(customer.id, label="vm", scope="instance")
+    headers = {"Authorization": f"Bearer {raw_instance}"}
+
+    # Can moderate.
+    r = client.post("/v1/moderate", json={"text": "hello"}, headers=headers)
+    assert r.status_code == 200, r.text
+
+    # Cannot mint keys, open the portal, or provision.
+    r = client.post("/billing/keys", json={"label": "sneaky"}, headers=headers)
+    assert r.status_code == 403
+    assert "instance-scoped" in r.json()["detail"]
+
+    r = client.post("/billing/portal", json={"return_url": "https://x.test"}, headers=headers)
+    assert r.status_code == 403
+
+    r = client.post("/billing/provision", json={"provider": "vastai"}, headers=headers)
+    assert r.status_code == 403
+
+
+def test_full_key_still_manages(client):
+    headers, _customer = _auth_headers_for_tier(Tier.SELF_HOSTED, email="fullkey@example.com")
+    r = client.post("/billing/keys", json={"label": "new"}, headers=headers)
+    assert r.status_code == 200
+    assert r.json()["api_key"].startswith("nmg_")
+
+
+def test_provision_injects_instance_scoped_key_not_master(client, monkeypatch):
+    """The caller's master key must never land in a provisioned VM's env."""
+    headers, customer = _auth_headers_for_tier(Tier.SELF_HOSTED, email="mint@example.com")
+    master_key = headers["Authorization"].split()[1]
+    offer = Offer(ProviderName.VAST_AI, "RTX 3090", 24, 0.07, "US", offer_id="fit")
+    instance = Instance(
+        provider=ProviderName.VAST_AI, instance_id="vast-live", gpu_model="RTX 3090",
+        vram_gb=24, region="US", state=InstanceState.LIVE,
+        endpoint_url="https://vast.test", ssh_command="ssh root@vast.test",
+    )
+    provider = FakeProvider([offer], instance=instance)
+    monkeypatch.setattr(srv, "providers_registry", lambda: FakeProviderRegistry([provider]))
+    _fund_gpu_credits(customer, amount_cents=1_000)
+
+    r = client.post(
+        "/billing/provision/cheapest",
+        headers=headers,
+        json={"ssh_public_key": None, "reserve_hours": 3.0},
+    )
+    assert r.status_code == 200, r.text
+    injected = provider.provision_calls[0]["env"]["NEMOGUARDIAN_API_KEY"]
+    assert injected.startswith("nmg_")
+    assert injected != master_key  # the master key stays in the control plane
+
+    found = billing_db.lookup_api_key(injected)
+    assert found is not None
+    _c, key = found
+    assert key.scope == "instance"
+    job = billing_db.get_provisioning_job(r.json()["job_id"])
+    assert job.api_key_id == key.id
+
+
+def test_provision_failure_revokes_minted_instance_key(client, monkeypatch):
+    headers, customer = _auth_headers_for_tier(Tier.SELF_HOSTED, email="mintfail@example.com")
+    offer = Offer(ProviderName.VAST_AI, "RTX 3090", 24, 0.07, "US", offer_id="fit")
+    provider = FakeProvider([offer], provision_error=ProvisionError("provider down"))
+    monkeypatch.setattr(srv, "providers_registry", lambda: FakeProviderRegistry([provider]))
+    _fund_gpu_credits(customer, amount_cents=1_000)
+
+    r = client.post(
+        "/billing/provision/cheapest",
+        headers=headers,
+        json={"ssh_public_key": None, "reserve_hours": 3.0},
+    )
+    assert r.status_code == 502
+    # The key minted for the failed VM must not survive as a usable credential.
+    injected = provider.provision_calls[0]["env"]["NEMOGUARDIAN_API_KEY"]
+    assert billing_db.lookup_api_key(injected) is None
+
+
 def test_provision_unknown_offer_id_is_404(client, monkeypatch):
     headers, _customer = _auth_headers_for_tier(
         Tier.SELF_HOSTED, email="badoffer@example.com"
@@ -1007,6 +1087,118 @@ def test_billing_job_status_rejects_other_customer(client):
     assert r.status_code == 403
     assert r.json()["detail"] == "not your job"
     assert billing_db.get_customer(owner.id).email == "job-owner@example.com"
+
+
+def _key_by_id(customer_id: int, key_id: int):
+    return next(k for k in billing_db.list_api_keys(customer_id) if k.id == key_id)
+
+
+def test_rate_limit_validator_does_not_touch_last_used(client):
+    """#6: the per-request rate-limit key validator must be read-only — it runs
+    on the hot path and must not write last_used_at (that throttled write lives
+    in the auth dependency)."""
+    customer = billing_db.upsert_customer(email="rlval@example.com")
+    raw, _ = billing_db.create_api_key(customer.id)
+    assert billing_db.lookup_api_key(raw)[1].last_used_at is None
+    assert srv._rate_limit_key_validator(raw) is True
+    assert billing_db.lookup_api_key(raw)[1].last_used_at is None
+
+
+def test_zero_cost_provision_still_mints_and_attaches_instance_key(client):
+    """Blocker regression: a zero-cost offer (on_prem) auto-confirms in the guard
+    even without confirm=True, so the live job MUST carry an instance key —
+    never NULL, and never the caller's master key."""
+    headers, customer = _auth_headers_for_tier(Tier.SELF_HOSTED, email="zerocost@example.com")
+    master = headers["Authorization"].split()[1]
+
+    r = client.post("/billing/provision", headers=headers, json={"provider": "on_prem"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] in ("live", "provisioning")
+
+    job = billing_db.get_provisioning_job(body["job_id"])
+    assert job.api_key_id is not None  # was NULL before the fix
+    key = _key_by_id(customer.id, job.api_key_id)
+    assert key.scope == "instance"
+    assert key.revoked is False
+    # And the master key is not the minted one.
+    assert billing_db.lookup_api_key(master)[1].id != job.api_key_id
+
+
+def test_guarded_provision_abort_refunds_and_revokes(client, monkeypatch):
+    """#2/#3: if the guarded call raises after credits are reserved + a key
+    minted, both must be cleaned up — credits refunded (net zero) and no live
+    instance key left behind — and the original error must not be masked."""
+    headers, customer = _auth_headers_for_tier(Tier.SELF_HOSTED, email="guardfail@example.com")
+    fit = Offer(ProviderName.VAST_AI, "RTX 3090", 24, 0.50, "US", offer_id="fit")
+    provider = FakeProvider([fit])
+    monkeypatch.setattr(srv, "providers_registry", lambda: FakeProviderRegistry([provider]))
+    _fund_gpu_credits(customer, amount_cents=100_000)
+    before = billing_db.gpu_credit_balance_cents(customer.id)
+
+    async def boom(**kwargs):
+        raise RuntimeError("guard exploded")
+
+    monkeypatch.setattr(srv.billing_provisioning, "provision_instance_guarded", boom)
+
+    r = client.post(
+        "/billing/provision",
+        headers=headers,
+        json={"provider": "vastai", "confirm": True, "reserve_hours": 1.0},
+    )
+    assert r.status_code == 502
+    # Reservation refunded to net zero, and no un-revoked instance key survives.
+    assert billing_db.gpu_credit_balance_cents(customer.id) == before
+    live_instance_keys = [
+        k for k in billing_db.list_api_keys(customer.id)
+        if not k.revoked and k.scope == "instance"
+    ]
+    assert live_instance_keys == []
+
+
+def test_instance_key_forbidden_on_billing_reads(client):
+    customer = billing_db.upsert_customer(email="instread@example.com")
+    billing_db.set_customer_tier(customer.id, Tier.SELF_HOSTED)
+    raw_instance, _ = billing_db.create_api_key(customer.id, scope="instance")
+    h = {"Authorization": f"Bearer {raw_instance}"}
+    assert client.get("/billing/usage", headers=h).status_code == 403
+    assert client.get("/billing/gpu-credits", headers=h).status_code == 403
+    # Scope is checked in the dependency, before the job-ownership lookup.
+    assert client.get("/billing/jobs/1", headers=h).status_code == 403
+
+
+def test_job_teardown_revokes_instance_key_and_marks_destroyed(client, monkeypatch):
+    headers, customer = _auth_headers_for_tier(Tier.SELF_HOSTED, email="teardown@example.com")
+    offer = Offer(ProviderName.VAST_AI, "RTX 3090", 24, 0.07, "US", offer_id="fit")
+    instance = Instance(
+        provider=ProviderName.VAST_AI, instance_id="vast-live", gpu_model="RTX 3090",
+        vram_gb=24, region="US", state=InstanceState.LIVE,
+        endpoint_url="https://vast.test", ssh_command="ssh root@vast.test",
+    )
+    provider = FakeProvider([offer], instance=instance)
+    monkeypatch.setattr(srv, "providers_registry", lambda: FakeProviderRegistry([provider]))
+    _fund_gpu_credits(customer, amount_cents=1_000)
+
+    r = client.post("/billing/provision/cheapest", headers=headers, json={"reserve_hours": 3.0})
+    assert r.status_code == 200, r.text
+    job_id = r.json()["job_id"]
+    key_id = billing_db.get_provisioning_job(job_id).api_key_id
+    assert key_id is not None
+    assert _key_by_id(customer.id, key_id).revoked is False
+
+    td = client.post(f"/billing/jobs/{job_id}/teardown", headers=headers)
+    assert td.status_code == 200, td.text
+    assert td.json()["status"] == "destroyed"
+    assert _key_by_id(customer.id, key_id).revoked is True  # key can no longer be used
+
+
+def test_job_teardown_rejects_other_customer(client):
+    owner_headers, _owner = _auth_headers_for_tier(Tier.SELF_HOSTED, email="td-owner@example.com")
+    other_headers, _other = _auth_headers_for_tier(Tier.SELF_HOSTED, email="td-other@example.com")
+    create = client.post("/billing/provision", headers=owner_headers, json={"provider": "on_prem"})
+    job_id = create.json()["job_id"]
+    r = client.post(f"/billing/jobs/{job_id}/teardown", headers=other_headers)
+    assert r.status_code == 403
 
 
 def test_providers_catalog_endpoint_lists_known_providers(client):

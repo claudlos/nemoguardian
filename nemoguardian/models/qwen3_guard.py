@@ -16,13 +16,18 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from nemoguardian.models.base import ModerationModel
+from nemoguardian.models.base import ModerationModel, resolve_revision
 from nemoguardian.models.torch_runtime import (
     attn_impl_kwargs,
     bnb_compute_dtype,
     dtype_kwargs,
 )
 from nemoguardian.schemas import VerdictLabel
+
+# Pinned HF revisions (full commit SHAs, fetched 2026-07-03) so deploys are
+# reproducible and a compromised/retagged `main` can't swap weights under us.
+DEFAULT_GEN_REVISION = "6ec42827da0c1ff11e7a49dc269d2e810d27e108"
+DEFAULT_STREAM_REVISION = "419364a715de9840d47b1457982f64ff37f90ed4"
 
 # Label and category regexes (verbatim from Qwen3Guard model card)
 _LABEL_RE = re.compile(r"Safety: (Safe|Unsafe|Controversial)")
@@ -36,11 +41,16 @@ _REFUSAL_RE = re.compile(r"Refusal: (Yes|No)")
 
 def _parse_gen_output(text: str) -> dict[str, Any]:
     label_match = _LABEL_RE.search(text)
+    if label_match is None:
+        # A silent "Safe" default here would let format drift cast a real SAFE
+        # vote. Raising turns it into an error verdict, which the aggregator
+        # excludes (and, if every vote is dropped, applies the fail mode —
+        # fail-closed UNSAFE by default).
+        raise ValueError(f"unparseable Qwen3Guard output: {text[:200]!r}")
     categories = _CATEGORY_RE.findall(text)
     refusal_match = _REFUSAL_RE.search(text)
-    label = label_match.group(1) if label_match else "Safe"
     return {
-        "label": label,
+        "label": label_match.group(1),
         "categories": [c for c in categories if c != "None"],
         "refusal": refusal_match.group(1) if refusal_match else None,
     }
@@ -65,7 +75,12 @@ class Qwen3GuardGen(ModerationModel):
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
-        kwargs: dict[str, Any] = {**dtype_kwargs(torch), **attn_impl_kwargs(), "device_map": "auto"}
+        revision = resolve_revision(
+            self.model_name, self.DEFAULT_MODEL, "NEMOGUARDIAN_QWEN_REVISION", DEFAULT_GEN_REVISION
+        )
+        kwargs: dict[str, Any] = {
+            **dtype_kwargs(torch), **attn_impl_kwargs(), "device_map": "auto", "revision": revision,
+        }
         if self.load_in_4bit:
             from transformers import BitsAndBytesConfig
 
@@ -73,7 +88,7 @@ class Qwen3GuardGen(ModerationModel):
                 load_in_4bit=True,
                 bnb_4bit_compute_dtype=bnb_compute_dtype(torch),
             )
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, revision=revision)
         self.model = AutoModelForCausalLM.from_pretrained(self.model_name, **kwargs)
         self.model.eval()
 
@@ -146,11 +161,18 @@ class Qwen3GuardStream:
         import torch
         from transformers import AutoModelForTokenClassification, AutoTokenizer
 
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        revision = resolve_revision(
+            self.model_name,
+            self.DEFAULT_MODEL,
+            "NEMOGUARDIAN_QWEN_STREAM_REVISION",
+            DEFAULT_STREAM_REVISION,
+        )
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, revision=revision)
         self.model = AutoModelForTokenClassification.from_pretrained(
             self.model_name,
             **dtype_kwargs(torch),
             device_map="auto",
+            revision=revision,
         )
         self.model.eval()
 

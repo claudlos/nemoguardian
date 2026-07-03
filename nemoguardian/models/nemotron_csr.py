@@ -15,13 +15,16 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from nemoguardian.models.base import ModerationModel
+from nemoguardian.models.base import ModerationModel, resolve_revision
 from nemoguardian.models.torch_runtime import (
     attn_impl_kwargs,
     bnb_compute_dtype,
     dtype_kwargs,
 )
 from nemoguardian.schemas import VerdictLabel
+
+# Pinned HF revision (full commit SHA, fetched 2026-07-03); see resolve_revision.
+DEFAULT_CSR_REVISION = "29da6ec41d9c710d937afcd41f65e241ab822792"
 
 # Tolerant of casing/spacing drift in the model's output ("Prompt harm:",
 # "Prompt Harm :", "PROMPT HARM:", etc.). The model card uses inconsistent
@@ -87,7 +90,12 @@ class NemotronCSR(ModerationModel):
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
-        kwargs: dict[str, Any] = {**dtype_kwargs(torch), **attn_impl_kwargs(), "device_map": "auto"}
+        revision = resolve_revision(
+            self.model_name, self.DEFAULT_MODEL, "NEMOGUARDIAN_CSR_REVISION", DEFAULT_CSR_REVISION
+        )
+        kwargs: dict[str, Any] = {
+            **dtype_kwargs(torch), **attn_impl_kwargs(), "device_map": "auto", "revision": revision,
+        }
         if self.load_in_4bit:
             from transformers import BitsAndBytesConfig
 
@@ -95,7 +103,7 @@ class NemotronCSR(ModerationModel):
                 load_in_4bit=True,
                 bnb_4bit_compute_dtype=bnb_compute_dtype(torch),
             )
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, revision=revision)
         self.model = AutoModelForCausalLM.from_pretrained(self.model_name, **kwargs)
         self.model.eval()
 

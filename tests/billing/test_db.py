@@ -19,6 +19,116 @@ def isolated_db(monkeypatch, tmp_path):
     db._conn = None
 
 
+def test_default_db_path_not_in_tmp(monkeypatch):
+    """NMG-007: outside Docker the DB (API-key hashes) must not land in /tmp."""
+    monkeypatch.delenv("NEMOGUARDIAN_DB_PATH", raising=False)
+    path = db.default_db_path()
+    assert "/tmp" not in str(path).replace("\\", "/")
+    assert path.name == "nemoguardian.db"
+    assert path.parent.name == ".nemoguardian"
+
+
+def test_default_db_path_env_override(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEMOGUARDIAN_DB_PATH", str(tmp_path / "custom.db"))
+    assert db.default_db_path() == tmp_path / "custom.db"
+
+
+def test_create_api_key_scope_persisted():
+    customer = db.upsert_customer(email="scope@example.com")
+    db.set_customer_tier(customer.id, Tier.SELF_HOSTED)
+    raw, record = db.create_api_key(customer.id, label="vm", scope="instance")
+    assert record.scope == "instance"
+    found = db.lookup_api_key(raw)
+    assert found is not None
+    _customer, key = found
+    assert key.scope == "instance"
+    assert key.id == record.id
+
+
+def test_create_api_key_rejects_unknown_scope():
+    customer = db.upsert_customer(email="badscope@example.com")
+    with pytest.raises(ValueError, match="unknown API key scope"):
+        db.create_api_key(customer.id, scope="admin")
+
+
+def test_instance_keys_exempt_from_quota():
+    customer = db.upsert_customer(email="quota@example.com")  # free tier: 1 key max
+    db.create_api_key(customer.id, label="the one full key")
+    with pytest.raises(ValueError, match="max API keys"):
+        db.create_api_key(customer.id, label="second full key")
+    # Instance keys don't consume the full-key quota.
+    db.create_api_key(customer.id, label="vm-1", scope="instance")
+    db.create_api_key(customer.id, label="vm-2", scope="instance")
+
+
+def test_lookup_customer_by_api_key_still_touches(monkeypatch):
+    customer = db.upsert_customer(email="touch@example.com")
+    raw, _record = db.create_api_key(customer.id)
+    assert db.lookup_api_key(raw)[1].last_used_at is None
+    resolved = db.lookup_customer_by_api_key(raw)
+    assert resolved.id == customer.id
+    assert db.lookup_api_key(raw)[1].last_used_at is not None
+
+
+def test_migration_adds_scope_and_api_key_id_to_old_db(tmp_path, monkeypatch):
+    """A DB created before scope/api_key_id existed gains them idempotently."""
+    import sqlite3
+
+    old = tmp_path / "old.db"
+    conn = sqlite3.connect(str(old))
+    conn.executescript(
+        """
+        CREATE TABLE customers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE NOT NULL,
+            stripe_customer_id TEXT, tier TEXT NOT NULL DEFAULT 'free',
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE TABLE api_keys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_id INTEGER NOT NULL REFERENCES customers(id),
+            key_hash TEXT UNIQUE NOT NULL, label TEXT, created_at TEXT NOT NULL,
+            last_used_at TEXT, revoked INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE provisioning_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_id INTEGER NOT NULL REFERENCES customers(id),
+            tier TEXT NOT NULL, provider TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending', instance_id TEXT,
+            endpoint_url TEXT, ssh_command TEXT, error_message TEXT,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setenv("NEMOGUARDIAN_DB_PATH", str(old))
+    db._conn = None
+    db.init_db(str(old))  # runs SCHEMA (IF NOT EXISTS) + _migrate
+    customer = db.upsert_customer(email="old@example.com")
+    _raw, record = db.create_api_key(customer.id, scope="instance")
+    assert record.scope == "instance"
+
+    # Idempotent: re-running init on the migrated file must not error.
+    db._conn = None
+    db.init_db(str(old))
+    assert db.lookup_api_key(_raw) is not None
+
+
+def test_console_entry_point_resolves():
+    """pyproject's [project.scripts] must point at an importable callable."""
+    import re
+    from importlib import import_module
+    from pathlib import Path
+
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    match = re.search(
+        r'^nemoguardian\s*=\s*"([\w.]+):(\w+)"\s*$',
+        pyproject.read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    assert match, "nemoguardian console script missing from pyproject.toml"
+    module = import_module(match.group(1))
+    assert callable(getattr(module, match.group(2)))
+
+
 def test_upsert_customer_creates_then_updates():
     a = db.upsert_customer(email="a@example.com")
     assert a.id >= 1

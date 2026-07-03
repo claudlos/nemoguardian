@@ -55,7 +55,8 @@ DEFAULT_RATE_WINDOW_SECONDS = 60.0
 
 #: Moderation paths guarded by the limiter + body-size check. Matched as
 #: prefixes so ``/v1/moderate/stream`` is covered by ``/v1/moderate``.
-PROTECTED_PREFIXES: tuple[str, ...] = ("/v1/moderate", "/demo/moderate")
+#: ``/billing/keys`` is included so API-key minting can't be flooded.
+PROTECTED_PREFIXES: tuple[str, ...] = ("/v1/moderate", "/demo/moderate", "/billing/keys")
 
 
 def _env(name: str) -> str | None:

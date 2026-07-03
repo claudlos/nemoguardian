@@ -66,7 +66,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
 # Boot with uvicorn. Supply NEMOGUARDIAN_API_KEY at runtime via env or secret.
 ENV NEMOGUARDIAN_SELF_HOSTED_EMAIL=self-hosted@nemoguardian.local \
     NEMOGUARDIAN_TIER=self_hosted \
-    NEMOGUARDIAN_CASCADE_MODE=standard \
     NEMOGUARDIAN_QUANTIZE=1 \
     NEMOGUARDIAN_QWEN_MODEL=Qwen/Qwen3Guard-Gen-4B \
     NEMOGUARDIAN_QWEN_STREAM_MODEL=Qwen/Qwen3Guard-Stream-0.6B \
