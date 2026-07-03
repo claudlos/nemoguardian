@@ -122,8 +122,9 @@ The same Docker image runs everywhere. Pick the price/perf trade-off:
 | RTX 4090 | 24 GB | $0.18 | Vast.ai | |
 | H100 80 GB | 80 GB | $0.19 | Vast.ai | Flagship. |
 | RTX 5090 | 32 GB | $0.21 | Vast.ai | Best $/perf sweet spot. |
+| RTX Pro 6000 | 96 GB | $0.25 | GPUhub | Zero egress. |
 | L40S 48 GB | 48 GB | $0.50 | RunPod | |
-| Hetzner GEX131 | 96 GB | $1.92 | Hetzner (DE) | Dedicated. EU GDPR. |
+| RTX PRO 6000 | 96 GB | $2.10 | Hetzner (DE) | Dedicated. EU GDPR. |
 | DO H100 80 GB | 80 GB | $3.39 | DigitalOcean | Enterprise. |
 
 > 💡 **Hero line:** the same Nemotron cascade runs on a $0.07/hr RTX 3090 as on a $3.39/hr H100 — pick your poison.
@@ -195,6 +196,8 @@ nemoguardian/
 |---|---|
 | [`README.md`](./README.md) | This file — quickstart + architecture |
 | [`SUBMISSION.md`](./SUBMISSION.md) | Hackathon writeup, NVIDIA + Stripe partnership pitch |
+| [`docs/API.md`](./docs/API.md) | Endpoint reference (auth, rate limits, request/response shapes) |
+| [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | Cascade diagram, failure contract, billing control plane |
 | [`docs/JUDGE_GUIDE.md`](./docs/JUDGE_GUIDE.md) | Fast review path for judges (no GPU needed) |
 | [`docs/VASTAI_DEMO_RUNBOOK.md`](./docs/VASTAI_DEMO_RUNBOOK.md) | GPU host checklist — provision → boot → record |
 | [`docs/PRE_SUBMIT_CHECKLIST.md`](./docs/PRE_SUBMIT_CHECKLIST.md) | Final submission gate |

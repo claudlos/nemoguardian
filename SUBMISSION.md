@@ -70,7 +70,7 @@ Total VRAM at FP16: **~17.5GB minimum, 24GB comfortable, 32GB headroom.**
 | **Vast.ai** | RTX 5090 | $0.21 | Global |
 | **GPUhub** | RTX Pro 6000 96GB | $0.25 | Zero egress |
 | **RunPod** | L40S 48GB | $0.50 | Global |
-| **Salad / Hetzner** | Dedicated bare metal | $0.41–1.92 | EU / global |
+| **Salad / Hetzner** | Dedicated bare metal | $0.41–2.10 | EU / global |
 | **Lyceum** | H200 141GB | $2.20 | EU-sovereign |
 | **DigitalOcean** | H100 80GB | $3.39 | US |
 | **AWS / Azure / GCP** | Various | $3+ | Enterprise compliance |

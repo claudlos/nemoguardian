@@ -220,6 +220,14 @@
     padding: 18px;
   }
 
+  .error {
+    color: var(--red);
+    border: 1px solid var(--red);
+    border-radius: 8px;
+    padding: 18px;
+    background: rgba(217, 95, 86, 0.08);
+  }
+
   .kv {
     display: grid;
     grid-template-columns: 120px 1fr;
@@ -355,7 +363,7 @@
 
     <section class="panel">
       <h2>Verdict</h2>
-      <div id="result">
+      <div id="result" role="status" aria-live="polite">
         <div class="empty">Awaiting moderation result.</div>
       </div>
     </section>
@@ -458,7 +466,7 @@ async function loadOffers() {
       </tr>
     `).join("");
   } catch (error) {
-    tbody.innerHTML = `<tr><td colspan="6">${escapeHtml(error.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="error">Could not load offers: ${escapeHtml(error.message)}</td></tr>`;
   }
 }
 
@@ -495,7 +503,7 @@ async function runModeration(event) {
     renderResult(payload);
     loadHealth();
   } catch (error) {
-    result.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+    result.innerHTML = `<div class="error">Moderation request failed: ${escapeHtml(error.message)}</div>`;
   } finally {
     button.disabled = false;
   }
