@@ -117,4 +117,6 @@ jobs:
       - name: Audit dependencies
         run: |
           python -m pip install -e .
-          pip-audit --strict
+          # --skip-editable: don't try to audit our own unpublished package
+          # (nemoguardian isn't on PyPI, which --strict would treat as a failure).
+          pip-audit --strict --skip-editable
