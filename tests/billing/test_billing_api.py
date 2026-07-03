@@ -6,7 +6,6 @@ import hashlib
 import hmac
 import json
 import time
-from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,23 +13,13 @@ from fastapi.testclient import TestClient
 from nemoguardian import server as srv
 from nemoguardian.billing import db as billing_db
 from nemoguardian.billing.plans import Tier
-from nemoguardian.cascade import Cascade
 from nemoguardian.policy.presets import get_preset
 from nemoguardian.schemas import ModelVerdict, ModerateResponse, VerdictLabel
 
 
 @pytest.fixture(autouse=True)
-def isolated_db(monkeypatch, tmp_path):
-    db_path = tmp_path / "nmg_test.db"
-    monkeypatch.setenv("NEMOGUARDIAN_DB_PATH", str(db_path))
-    monkeypatch.delenv("NEMOGUARDIAN_API_KEY", raising=False)
-    monkeypatch.delenv("NEMOGUARDIAN_TIER", raising=False)
-    monkeypatch.delenv("NEMOGUARDIAN_SELF_HOSTED_EMAIL", raising=False)
-    monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
-    monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
-    monkeypatch.delenv("NEMOGUARDIAN_INSECURE_WEBHOOK_DEMO", raising=False)
-    billing_db._conn = None
-    billing_db.init_db(str(db_path))
+def _isolated_db(isolated_db):
+    """Fresh SQLite DB per test (shared fixture from conftest)."""
     yield
 
 
@@ -71,24 +60,9 @@ def _mock_moderate(request, policy_engine=None, **kw) -> ModerateResponse:
 
 @pytest.fixture
 def client(monkeypatch):
-    fake_cascade = MagicMock(spec=Cascade)
-    fake_cascade.moderate.side_effect = _mock_moderate
-    fake_cascade.loaded_models.return_value = {
-        "qwen3_guard_gen": False,
-        "qwen3_guard_stream": False,
-        "nemotron_csr": False,
-    }
-    fake_cascade.model_config_summary.return_value = {
-        "qwen_gen_model": "mock-qwen",
-        "nemotron_csr_model": "mock-csr",
-        "enable_triage": True,
-    }
-    fake_cascade.triage_status.return_value = {
-        "configured": False,
-        "provider": None,
-        "model": "mock-triage",
-        "base_url": "https://example.test/v1",
-    }
+    from tests.conftest import make_mock_cascade
+
+    fake_cascade = make_mock_cascade(_mock_moderate)
     policies = {name: get_preset(name) for name in ("discord", "twitch", "generic")}
     monkeypatch.setattr(srv, "get_cascade", lambda: fake_cascade)
     monkeypatch.setattr(srv, "get_policies", lambda: policies)

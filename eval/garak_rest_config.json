@@ -1,0 +1,18 @@
+{
+  "rest": {
+    "RestGenerator": {
+      "name": "nemoguardian-moderate",
+      "uri": "http://localhost:8000/demo/moderate?policy_preset=generic",
+      "method": "post",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "req_template_json_object": {
+        "text": "$INPUT",
+        "mode": "standard"
+      },
+      "response_json": true,
+      "response_json_field": "verdict"
+    }
+  }
+}

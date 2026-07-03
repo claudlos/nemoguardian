@@ -18,7 +18,7 @@ lint:
 	$(PYTHON) -m ruff check .
 
 test:
-	$(PYTHON) -m pytest -q
+	$(PYTHON) -m pytest -q --cov=nemoguardian --cov-report=term-missing --cov-fail-under=82
 
 verify: lint test
 

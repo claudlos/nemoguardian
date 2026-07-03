@@ -7,13 +7,11 @@ return synthetic verdicts.
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 
 from nemoguardian import server as srv
-from nemoguardian.cascade import Cascade
 from nemoguardian.policy.presets import get_preset
 from nemoguardian.schemas import ModelVerdict, ModerateResponse, VerdictLabel
 
@@ -67,38 +65,18 @@ def _mock_moderate(request, policy_engine=None, **kw) -> ModerateResponse:
 
 
 @pytest.fixture
-def client(monkeypatch, tmp_path):
-    fake_cascade = MagicMock(spec=Cascade)
-    fake_cascade.moderate.side_effect = _mock_moderate
+def client(monkeypatch, isolated_db):
+    from tests.conftest import make_mock_cascade
+
+    fake_cascade = make_mock_cascade(_mock_moderate, triage_configured=True)
     fake_cascade.stream_token_verdicts.return_value = [
         (VerdictLabel.SAFE, 0.05, 0),
         (VerdictLabel.UNSAFE, 0.80, 3),
     ]
-    fake_cascade.loaded_models.return_value = {
-        "qwen3_guard_gen": False,
-        "qwen3_guard_stream": False,
-        "nemotron_csr": False,
-    }
-    fake_cascade.model_config_summary.return_value = {
-        "qwen_gen_model": "mock-qwen",
-        "nemotron_csr_model": "mock-csr",
-        "enable_triage": True,
-    }
-    fake_cascade.triage_status.return_value = {
-        "configured": True,
-        "provider": "nvidia",
-        "model": "mock-triage",
-        "base_url": "https://example.test/v1",
-    }
     policies = {name: get_preset(name) for name in ("discord", "twitch", "generic")}
 
-    # Use a temp DB + provision a free-tier API key the tests can authenticate with.
-    from nemoguardian.billing import db as billing_db
-
-    db_path = tmp_path / "nmg_api_test.db"
-    monkeypatch.setenv("NEMOGUARDIAN_DB_PATH", str(db_path))
-    billing_db._conn = None
-    billing_db.init_db(str(db_path))
+    # Provision a free-tier API key the tests can authenticate with.
+    billing_db = isolated_db
     customer = billing_db.upsert_customer(email="tester@example.com")
     raw_key, _ = billing_db.create_api_key(customer.id, label="api-test")
     # Promote to PRO so the tests aren't blocked by tier restrictions.
@@ -219,6 +197,84 @@ def test_last_used_write_throttled(client, monkeypatch):
     assert client.post("/v1/moderate", json={"text": "a"}).status_code == 200
     assert client.post("/v1/moderate", json={"text": "b"}).status_code == 200
     assert len(calls) == 1  # second request lands inside the 60s throttle window
+
+
+def test_providers_catalog_lists_all(client):
+    r = client.get("/providers")
+    assert r.status_code == 200
+    providers = r.json()["providers"]
+    assert len(providers) >= 9
+    names = {p["name"] for p in providers}
+    assert "vastai" in names
+
+
+def test_providers_offers_only_fits_filter(client, monkeypatch):
+    monkeypatch.delenv("VASTAI_API_KEY", raising=False)
+    r = client.get("/providers/offers")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["count"] == len(body["offers"])
+    assert body["count"] > 0
+    vram_req = body["cascade_vram_requirement_gb"]
+    assert all(o["vram_gb"] >= vram_req for o in body["offers"])
+    # Sorted cheapest-first.
+    prices = [o["price_per_hour_usd"] for o in body["offers"]]
+    assert prices == sorted(prices)
+
+
+def test_providers_offers_max_price_filter(client, monkeypatch):
+    monkeypatch.delenv("VASTAI_API_KEY", raising=False)
+    r = client.get("/providers/offers", params={"max_price_usd": 0.10})
+    assert r.status_code == 200
+    assert all(o["price_per_hour_usd"] <= 0.10 for o in r.json()["offers"])
+
+
+def test_allowance_exceeded_returns_429_with_upgrade_url(client, monkeypatch):
+    monkeypatch.setattr(
+        srv.billing_metered,
+        "check_allowance",
+        lambda customer_id: (False, {"total_calls": 999, "allowance": 999}),
+    )
+    r = client.post("/v1/moderate", json={"text": "x"})
+    assert r.status_code == 429
+    detail = r.json()["detail"]
+    assert detail["error"] == "monthly allowance exceeded"
+    assert detail["upgrade_url"].startswith("/billing/checkout")
+
+
+def test_moderation_failure_returns_sanitized_500(client, monkeypatch):
+    fake = srv.get_cascade()
+    fake.moderate.side_effect = RuntimeError("secret path /opt/models leaked?")
+    r = client.post("/v1/moderate", json={"text": "x"})
+    assert r.status_code == 500
+    detail = r.json()["detail"]
+    assert detail["error"] == "moderation_failed"
+    assert "correlation_id" in detail
+    # The raw exception text must not reach the client.
+    assert "secret path" not in r.text
+
+
+def test_stream_midway_error_emits_terminal_fallback_chunk(client):
+    fake = srv.get_cascade()
+
+    def half_broken_stream(text):
+        yield (VerdictLabel.UNSAFE, 0.9, 0)
+        raise RuntimeError("model wedged")
+
+    fake.stream_token_verdicts.side_effect = half_broken_stream
+    r = client.post("/v1/moderate/stream", json={"text": "abc"})
+    assert r.status_code == 200
+    lines = [json.loads(line) for line in r.text.strip().splitlines()]
+    assert lines[-1]["is_terminal"] is True
+    # Worst verdict seen before the crash is preserved, and the partial
+    # stream is still billed.
+    assert lines[-1]["verdict_so_far"] == "unsafe"
+    from nemoguardian.billing import db as billing_db
+    from nemoguardian.billing import metered as billing_metered
+
+    customer = billing_db.get_customer_by_email("tester@example.com")
+    _allowed, usage = billing_metered.check_allowance(customer.id)
+    assert usage["total_calls"] == 1
 
 
 def test_stream_moderation_is_authenticated_and_metered(client):
