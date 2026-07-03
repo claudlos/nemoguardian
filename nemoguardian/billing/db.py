@@ -139,7 +139,9 @@ def init_db(path: Path | str | None = None) -> sqlite3.Connection:
     with _lock:
         if _conn is None:
             _conn = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
-            if os.name == "posix":
+            # Only tighten the file mode on the location we own; leave an
+            # operator-chosen env/explicit path at whatever mode they set.
+            if os.name == "posix" and not explicit:
                 os.chmod(path, 0o600)
             _conn.row_factory = sqlite3.Row
             # WAL tolerates concurrent readers while a write commits; busy_timeout

@@ -41,6 +41,21 @@ from nemoguardian.review.models import (
     CaseStatus,
 )
 
+
+@pytest.fixture(autouse=True)
+def _isolate_billing_db(monkeypatch, tmp_path):
+    """Keep every test's SQLite writes inside tmp_path.
+
+    Several tests below call ``db.init_db()`` with no path (some via a no-op
+    ``setattr(db, "DB_PATH", ...)``). With the DB default now at
+    ``~/.nemoguardian`` that would touch a real operator DB, so pin it here.
+    """
+    monkeypatch.setenv("NEMOGUARDIAN_DB_PATH", str(tmp_path / "coverage_gaps.db"))
+    db._conn = None
+    yield
+    db._conn = None
+
+
 # ---------------------------------------------------------------------------
 # matrix: _safe_call non-callable, doctor disabled / unknown power
 # ---------------------------------------------------------------------------

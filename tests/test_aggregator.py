@@ -135,6 +135,18 @@ def test_aggregate_fail_mode_from_env(monkeypatch):
     assert aggregate({}).verdict == VerdictLabel.UNSAFE
 
 
+def test_hard_unsafe_override_beats_fail_open_even_with_zero_weight():
+    from nemoguardian.aggregator import AggregatorConfig
+
+    # An unmapped key contributes zero weight (weighted_total == 0) but still
+    # trips the hard-unsafe override. Fail-open must NOT downgrade that to safe.
+    out = aggregate(
+        {"unmapped_guard": _mv("u", "unsafe", 0.9)},
+        config=AggregatorConfig(fail_mode="open"),
+    )
+    assert out.verdict == VerdictLabel.UNSAFE
+
+
 def test_aggregate_with_triage_deep_mode():
     out = aggregate(
         {

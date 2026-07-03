@@ -44,7 +44,8 @@ def _parse_gen_output(text: str) -> dict[str, Any]:
     if label_match is None:
         # A silent "Safe" default here would let format drift cast a real SAFE
         # vote. Raising turns it into an error verdict, which the aggregator
-        # excludes (and escalates to CONTROVERSIAL if every vote is dropped).
+        # excludes (and, if every vote is dropped, applies the fail mode —
+        # fail-closed UNSAFE by default).
         raise ValueError(f"unparseable Qwen3Guard output: {text[:200]!r}")
     categories = _CATEGORY_RE.findall(text)
     refusal_match = _REFUSAL_RE.search(text)

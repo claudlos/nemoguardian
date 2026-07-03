@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import os
+from contextlib import suppress
 from decimal import ROUND_CEILING, Decimal
 from pathlib import Path
 from typing import Annotated, ClassVar
@@ -108,7 +109,10 @@ def _rate_limit_key_validator(raw_key: str) -> bool:
     if not raw_key.startswith("nmg_"):
         return False
     try:
-        if billing_db.lookup_customer_by_api_key(raw_key) is not None:
+        # Read-only lookup: this runs on every rate-limited request, so it must
+        # not write last_used_at (that throttled write happens once in the auth
+        # dependency, off the event loop).
+        if billing_db.lookup_api_key(raw_key) is not None:
             return True
         return billing_auth._lookup_env_bootstrap_customer(raw_key) is not None
     except Exception:  # never break moderation on a lookup error
@@ -400,7 +404,7 @@ async def billing_gpu_credit_checkout_status(
 
 @app.get("/billing/gpu-credits", response_model=GpuCreditBalanceResponse)
 async def billing_gpu_credit_balance(
-    auth: billing_auth.AuthContext = Depends(billing_auth.require_api_key),
+    auth: billing_auth.AuthContext = Depends(billing_auth.require_full_scope),
     limit: Annotated[int, Query(ge=0, le=100)] = 25,
 ) -> GpuCreditBalanceResponse:
     """Show the authenticated customer's GPU credit balance and recent ledger events."""
@@ -466,7 +470,7 @@ async def billing_create_key(
 
 @app.get("/billing/usage", response_model=UsageResponse)
 async def billing_usage(
-    auth: billing_auth.AuthContext = Depends(billing_auth.require_api_key),
+    auth: billing_auth.AuthContext = Depends(billing_auth.require_full_scope),
 ) -> UsageResponse:
     """Show this customer's current-period usage and overage projection."""
     _allowed, info = billing_metered.check_allowance(auth.customer.id)
@@ -559,38 +563,64 @@ async def billing_provision(
                 },
             ) from exc
 
-    # Only mint an instance-scoped key when we'll actually provision — an
-    # unconfirmed dry-run creates no VM and needs no credential (NMG-009).
-    if confirmed:
-        env, instance_key_id = _mint_instance_env(auth)
+    # Always mint an instance-scoped key up front (NMG-009): the guard decides
+    # whether to actually provision — including auto-confirming zero-cost offers,
+    # which the endpoint's own `confirmed` flag does NOT model — so we can't
+    # predict here whether a VM will be created. Reconcile after: attach the key
+    # to a live job, otherwise revoke it. The caller's master key never travels.
+    env, instance_key_id = _mint_instance_env(auth)
+
+    def _cleanup_on_abort(reason: str) -> None:
+        # Revoke the minted key and refund any reservation; suppress so neither
+        # step can mask the other or the original error.
+        with suppress(Exception):
+            billing_db.revoke_api_key(auth.customer.id, instance_key_id)
+        nonlocal reserved
+        if reserved:
+            with suppress(Exception):
+                billing_db.record_gpu_credit_event(
+                    customer_id=auth.customer.id,
+                    event_type="provision_refund",
+                    amount_cents=reserve_cents,
+                    provider=req.provider,
+                    job_id=None,
+                    description="Refund GPU credit reservation after provisioning failure",
+                    metadata={"reason": reason},
+                )
+            reserved = False
+
+    try:
+        job = await billing_provisioning.provision_instance_guarded(
+            customer_id=auth.customer.id,
+            provider=req.provider,
+            offer=offer,
+            provider_client=provider,
+            reserve_hours=req.reserve_hours,
+            confirm=req.confirm,
+            ops_config=ops_config,
+            ssh_public_key=req.ssh_public_key,
+            image=req.image,
+            env=env,
+        )
+    except Exception as exc:
+        # The guarded call raised unexpectedly after we reserved credits and
+        # minted the key — clean both up before surfacing the error so a failure
+        # never burns credits or leaves a live orphaned credential.
+        _cleanup_on_abort(str(exc))
+        logger.exception("provisioning_failed", provider=req.provider, error=str(exc))
+        raise HTTPException(502, f"provisioning failed: {exc}") from exc
+
+    if job.status in ("live", "provisioning"):
+        # Tie the instance-scoped key to the live job so teardown can revoke it.
+        billing_db.update_provisioning_job(job.id, api_key_id=instance_key_id)
     else:
-        env = {
-            "STRIPE_CUSTOMER_ID": auth.customer.stripe_customer_id or "",
-            "NEMOGUARDIAN_CUSTOMER_ID": str(auth.customer.id),
-        }
-        instance_key_id = None
-    job = await billing_provisioning.provision_instance_guarded(
-        customer_id=auth.customer.id,
-        provider=req.provider,
-        offer=offer,
-        provider_client=provider,
-        reserve_hours=req.reserve_hours,
-        confirm=req.confirm,
-        ops_config=ops_config,
-        ssh_public_key=req.ssh_public_key,
-        image=req.image,
-        env=env,
-    )
-    if instance_key_id is not None:
-        if job.status in ("live", "provisioning"):
-            # Tie the instance-scoped key to the live job so teardown can revoke it.
-            billing_db.update_provisioning_job(job.id, api_key_id=instance_key_id)
-        else:
-            # No live instance came back — revoke the minted credential.
+        # No live instance came back (planned dry-run, rejected, or failed) —
+        # revoke the minted credential so it can't be used against us.
+        with suppress(Exception):
             billing_db.revoke_api_key(auth.customer.id, instance_key_id)
     if reserved and job.status not in ("live", "provisioning"):
-        # No live instance came back (rejected/failed) — refund the reservation
-        # so a failed provision never silently burns the customer's credits.
+        # No live instance came back — refund the reservation so a failed
+        # provision never silently burns the customer's credits.
         billing_db.record_gpu_credit_event(
             customer_id=auth.customer.id,
             event_type="provision_refund",
@@ -633,12 +663,50 @@ async def billing_provision(
 @app.get("/billing/jobs/{job_id}", response_model=ProvisioningResponse)
 async def billing_job_status(
     job_id: int,
-    auth: billing_auth.AuthContext = Depends(billing_auth.require_api_key),
+    auth: billing_auth.AuthContext = Depends(billing_auth.require_full_scope),
 ) -> ProvisioningResponse:
     """Check the status of a self-hosted provisioning job."""
     job = billing_db.get_provisioning_job(job_id)
     if job.customer_id != auth.customer.id:
         raise HTTPException(403, "not your job")
+    return ProvisioningResponse(
+        job_id=job.id,
+        status=job.status,
+        instance_id=job.instance_id,
+        endpoint_url=job.endpoint_url,
+        ssh_command=job.ssh_command,
+        error_message=job.error_message,
+    )
+
+
+@app.post("/billing/jobs/{job_id}/teardown", response_model=ProvisioningResponse)
+async def billing_job_teardown(
+    job_id: int,
+    auth: billing_auth.AuthContext = Depends(billing_auth.require_full_scope),
+) -> ProvisioningResponse:
+    """Tear down a provisioned instance and revoke its instance-scoped key.
+
+    Closes the NMG-009 lifecycle: a moderation key minted for a VM is a live
+    credential until the VM is gone, so teardown destroys the instance and
+    revokes the key so it can never be reused off a decommissioned box.
+    """
+    job = billing_db.get_provisioning_job(job_id)
+    if job.customer_id != auth.customer.id:
+        raise HTTPException(403, "not your job")
+
+    if job.instance_id:
+        try:
+            provider = providers_registry().get(ProviderName(job.provider))
+            await providers_ops.teardown(provider, job.instance_id, reason="requested")
+        except Exception as exc:  # teardown is best-effort; never block key revocation
+            logger.warning("teardown_provider_error", job_id=job.id, error=str(exc))
+
+    # Revoke the instance-scoped credential regardless of provider outcome.
+    if job.api_key_id is not None:
+        with suppress(Exception):
+            billing_db.revoke_api_key(auth.customer.id, job.api_key_id)
+    billing_db.update_provisioning_job(job.id, status="destroyed")
+    job = billing_db.get_provisioning_job(job.id)
     return ProvisioningResponse(
         job_id=job.id,
         status=job.status,
@@ -821,7 +889,9 @@ async def billing_provision_cheapest(
         )
     except Exception as exc:
         # Don't leave an orphaned live credential behind a failed provision.
-        billing_db.revoke_api_key(auth.customer.id, instance_key_id)
+        # Suppress so a revoke error can't skip the credit refund below.
+        with suppress(Exception):
+            billing_db.revoke_api_key(auth.customer.id, instance_key_id)
         billing_db.record_gpu_credit_event(
             customer_id=auth.customer.id,
             event_type="provision_refund",
@@ -920,7 +990,9 @@ async def billing_provision_specific(
         )
     except Exception as exc:
         # Don't leave an orphaned live credential behind a failed provision.
-        billing_db.revoke_api_key(auth.customer.id, instance_key_id)
+        # Suppress so a revoke error can't skip the credit refund below.
+        with suppress(Exception):
+            billing_db.revoke_api_key(auth.customer.id, instance_key_id)
         billing_db.record_gpu_credit_event(
             customer_id=auth.customer.id,
             event_type="provision_refund",

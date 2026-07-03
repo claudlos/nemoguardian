@@ -12,8 +12,11 @@ Reconciliation of a parallel hardening line onto the v1.0.0 release.
 - **NMG-009 master-key leak fixed:** provisioning endpoints no longer inject the
   caller's raw master API key into rented GPU VMs. A moderation-only
   `instance`-scoped key is minted per VM, tied to the job, and revoked if the
-  provision fails. `require_full_scope` rejects instance-scoped keys (403) on
-  key-management, portal, and provisioning routes.
+  provision fails or aborts (incl. zero-cost auto-confirmed offers). New
+  `POST /billing/jobs/{id}/teardown` destroys the instance and revokes its key,
+  closing the credential lifecycle. `require_full_scope` rejects instance-scoped
+  keys (403) on key-management, portal, provisioning, and billing-data reads
+  (`/billing/usage`, `/billing/gpu-credits`, `/billing/jobs`).
 - Default HF model checkpoints pinned by full commit SHA (`revision=`), overridable
   via `NEMOGUARDIAN_*_REVISION`.
 - `starlette>=1.3.1` floor (PYSEC-2026-248/249, CVE-2026-48817/48818).

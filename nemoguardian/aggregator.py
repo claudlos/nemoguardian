@@ -107,8 +107,11 @@ def aggregate(
             if snippet:
                 reasons.append(f"[{label}] {snippet}")
 
-    if weighted_total == 0:
+    if weighted_total == 0 and not override_to_unsafe:
         # No usable verdict: every model errored, or the caller ran none.
+        # (A hard unsafe override always carries weight, so it can't reach here —
+        # but guard on it anyway so an explicit unsafe vote is never downgraded
+        # to safe by a fail-open return.)
         # Follow the configured fail mode instead of silently returning "safe"
         # (which is what an empty weighted mean would do).
         if cfg.fail_mode == "open":
