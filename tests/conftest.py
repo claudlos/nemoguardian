@@ -10,4 +10,7 @@ def _reset_singletons(monkeypatch):
 
     srv._State.cascade = None
     srv._State.policies = {}
+    # Rate-limit buckets are keyed by API-key id, which repeats across tests'
+    # fresh DBs — clear them so one test can't exhaust another's bucket.
+    srv._rate_limiter.reset()
     yield

@@ -189,6 +189,38 @@ def test_demo_ui_served(client):
     assert "Moderation Console" in r.text
 
 
+def test_rate_limit_returns_429_with_retry_after(client, monkeypatch):
+    monkeypatch.setenv("NEMOGUARDIAN_RATE_LIMIT_RPM", "2")
+    srv._rate_limiter.reset()
+    assert client.post("/v1/moderate", json={"text": "a"}).status_code == 200
+    assert client.post("/v1/moderate", json={"text": "b"}).status_code == 200
+    r = client.post("/v1/moderate", json={"text": "c"})
+    assert r.status_code == 429
+    assert "Retry-After" in r.headers
+    assert r.json()["detail"]["error"] == "rate limit exceeded"
+
+
+def test_rate_limit_disabled_with_zero(client, monkeypatch):
+    monkeypatch.setenv("NEMOGUARDIAN_RATE_LIMIT_RPM", "0")
+    srv._rate_limiter.reset()
+    for _ in range(10):
+        assert client.post("/v1/moderate", json={"text": "x"}).status_code == 200
+
+
+def test_last_used_write_throttled(client, monkeypatch):
+    """Rapid consecutive requests must not write last_used_at each time."""
+    from nemoguardian.billing import db as billing_db
+
+    calls = []
+    real_touch = billing_db.touch_api_key
+    monkeypatch.setattr(
+        billing_db, "touch_api_key", lambda key_id: (calls.append(key_id), real_touch(key_id))
+    )
+    assert client.post("/v1/moderate", json={"text": "a"}).status_code == 200
+    assert client.post("/v1/moderate", json={"text": "b"}).status_code == 200
+    assert len(calls) == 1  # second request lands inside the 60s throttle window
+
+
 def test_stream_moderation_is_authenticated_and_metered(client):
     r = client.post("/v1/moderate/stream", json={"text": "drop your SSN"})
     assert r.status_code == 200
