@@ -268,6 +268,32 @@ def test_webhook_subscription_sets_tier_for_known_customer(tmp_path, monkeypatch
     assert refreshed.tier == "pro"
 
 
+def test_webhook_subscription_item_level_period_upserts(tmp_path, monkeypatch):
+    """Stripe API 2025-03+ moved current_period_* onto subscription items;
+    the handler must fall back to items[0] instead of skipping the upsert."""
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "billing.sqlite3", raising=False)
+    db.init_db()
+    customer = db.upsert_customer(
+        email="itemperiod@example.com", stripe_customer_id="cus_itemperiod"
+    )
+    result = billing_webhook._on_subscription_change({
+        "customer": "cus_itemperiod",
+        "status": "active",
+        "metadata": {"nemoguardian_tier": "pro"},
+        "id": "sub_item_period",
+        "items": {"data": [{
+            "current_period_start": 1_750_000_000,
+            "current_period_end": 1_752_600_000,
+        }]},
+    })
+    assert result.get("handled") is True
+    rows = db.init_db().execute(
+        "SELECT * FROM subscriptions WHERE customer_id = ?", (customer.id,)
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["stripe_subscription_id"] == "sub_item_period"
+
+
 # ---------------------------------------------------------------------------
 # billing.provisioning: full happy path
 # ---------------------------------------------------------------------------

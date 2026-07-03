@@ -323,6 +323,10 @@ def test_stream_moderation_is_authenticated_and_metered(client):
     assert lines[0]["verdict_so_far"] == "safe"
     assert lines[1]["verdict_so_far"] == "unsafe"
     assert lines[-1]["is_terminal"] is True
+    # Terminal chunk reflects the worst verdict seen in the stream, not a
+    # hardcoded "safe".
+    assert lines[-1]["verdict_so_far"] == "unsafe"
+    assert lines[-1]["score_so_far"] == pytest.approx(0.80)
 
     from nemoguardian.billing import db as billing_db
     from nemoguardian.billing import metered as billing_metered
@@ -331,6 +335,29 @@ def test_stream_moderation_is_authenticated_and_metered(client):
     assert customer is not None
     _allowed, usage = billing_metered.check_allowance(customer.id)
     assert usage["total_calls"] == 1
+
+
+def test_stream_midway_error_preserves_worst_verdict_and_bills(client):
+    fake = srv.get_cascade()
+
+    def half_broken_stream(text):
+        yield (VerdictLabel.UNSAFE, 0.9, 0)
+        raise RuntimeError("model wedged mid-stream")
+
+    fake.stream_token_verdicts.side_effect = half_broken_stream
+    r = client.post("/v1/moderate/stream", json={"text": "abc"})
+    assert r.status_code == 200
+    lines = [json.loads(line) for line in r.text.strip().splitlines()]
+    assert lines[-1]["is_terminal"] is True
+    # The worst verdict seen before the crash survives into the terminal chunk.
+    assert lines[-1]["verdict_so_far"] == "unsafe"
+
+    from nemoguardian.billing import db as billing_db
+    from nemoguardian.billing import metered as billing_metered
+
+    customer = billing_db.get_customer_by_email("tester@example.com")
+    _allowed, usage = billing_metered.check_allowance(customer.id)
+    assert usage["total_calls"] == 1  # partial stream that emitted tokens is billed
 
 
 def test_stream_moderation_returns_terminal_safe_chunk_on_error(client):

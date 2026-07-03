@@ -23,10 +23,13 @@ from contextlib import suppress
 from datetime import datetime, timezone
 from typing import Any
 
+import structlog
 from fastapi import HTTPException, Request, status
 
 from nemoguardian.billing import db
 from nemoguardian.billing.plans import Tier
+
+logger = structlog.get_logger("nemoguardian.billing.webhook")
 
 WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 DEFAULT_SIGNATURE_TOLERANCE_SECONDS = 300
@@ -243,6 +246,18 @@ def _on_subscription_change(sub: dict[str, Any]) -> dict[str, Any]:
     db.set_customer_tier(customer.id, tier)
     period_start = sub.get("current_period_start")
     period_end = sub.get("current_period_end")
+    if not (period_start and period_end):
+        # Stripe API 2025-03+ moved the billing period onto subscription items.
+        items = (sub.get("items") or {}).get("data") or []
+        if items:
+            period_start = items[0].get("current_period_start")
+            period_end = items[0].get("current_period_end")
+    if not (period_start and period_end):
+        logger.warning(
+            "subscription_period_missing",
+            stripe_subscription_id=sub.get("id"),
+            note="no current_period_* at top level or on items; subscription row not upserted",
+        )
     if period_start and period_end:
         db.upsert_subscription(
             customer_id=customer.id,

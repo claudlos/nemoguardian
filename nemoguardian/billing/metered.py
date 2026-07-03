@@ -33,7 +33,24 @@ def report_usage(customer_id: int, *, call_type: str, units: int = 1, request_id
         customer = db.get_customer(customer_id)
         if not customer.stripe_customer_id:
             return
-        # Find the subscription item for the metered plan and report usage.
+
+        # Preferred: Billing Meter Events (replaces usage records, which were
+        # removed from stripe-python v12+ / API 2024-04+). Needs a meter
+        # configured in Stripe and its event name in STRIPE_METER_EVENT_NAME.
+        meter_event_name = os.environ.get("STRIPE_METER_EVENT_NAME")
+        meter_event_cls = getattr(getattr(stripe, "billing", None), "MeterEvent", None)
+        if meter_event_name and meter_event_cls is not None:
+            meter_event_cls.create(
+                event_name=meter_event_name,
+                payload={
+                    "stripe_customer_id": customer.stripe_customer_id,
+                    "value": str(units),
+                },
+                timestamp=int(datetime.now(timezone.utc).timestamp()),
+            )
+            return
+
+        # Legacy fallback: metered subscription items (stripe-python < 12).
         subs = stripe.Subscription.list(customer=customer.stripe_customer_id, status="active")
         if not subs.data:
             return
@@ -41,7 +58,12 @@ def report_usage(customer_id: int, *, call_type: str, units: int = 1, request_id
         for item in sub.get("items", {}).get("data", []):
             price = item.get("price", {})
             if price.get("recurring", {}).get("usage_type") == "metered":
-                stripe.SubscriptionItem.create_usage_record(
+                create_usage_record = getattr(
+                    stripe.SubscriptionItem, "create_usage_record", None
+                )
+                if create_usage_record is None:
+                    return  # neither API available — usage stays recorded locally
+                create_usage_record(
                     item["id"],
                     quantity=units,
                     timestamp=int(datetime.now(timezone.utc).timestamp()),
