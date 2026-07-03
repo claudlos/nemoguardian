@@ -235,16 +235,22 @@ async def moderate_stream(
 
     cascade = get_cascade()
     request_id = f"stream_{uuid4().hex}"
-    billing_metered.report_usage(
-        auth.customer.id,
-        call_type="stream",
-        request_id=request_id,
-    )
 
     async def gen():
         start = dt.datetime.now()
+        severity = {"safe": 0, "controversial": 1, "unsafe": 2}
+        worst_label = "safe"
+        worst_score = 0.0
+        emitted_tokens = False
         try:
             for label, score, idx in cascade.stream_token_verdicts(request.text):
+                emitted_tokens = True
+                label_str = label.value if hasattr(label, "value") else str(label)
+                if severity.get(label_str, 0) > severity[worst_label]:
+                    worst_label = label_str
+                    worst_score = score
+                elif label_str == worst_label:
+                    worst_score = max(worst_score, score)
                 chunk = StreamChunk(
                     token_index=idx,
                     partial_text=request.text[: idx + 1],
@@ -259,8 +265,8 @@ async def moderate_stream(
             terminal = StreamChunk(
                 token_index=len(request.text),
                 partial_text=request.text,
-                verdict_so_far="safe",
-                score_so_far=0.0,
+                verdict_so_far=worst_label,
+                score_so_far=worst_score,
                 is_terminal=True,
                 latency_ms=elapsed_ms,
             )
@@ -270,11 +276,20 @@ async def moderate_stream(
             yield StreamChunk(
                 token_index=0,
                 partial_text=request.text,
-                verdict_so_far="safe",
-                score_so_far=0.0,
+                verdict_so_far=worst_label,
+                score_so_far=worst_score,
                 is_terminal=True,
                 latency_ms=0.0,
             ).model_dump_json() + "\n"
+        finally:
+            # Bill only for work actually delivered (any tokens streamed),
+            # including partially-streamed requests that then errored.
+            if emitted_tokens:
+                billing_metered.report_usage(
+                    auth.customer.id,
+                    call_type="stream",
+                    request_id=request_id,
+                )
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")
 
@@ -471,7 +486,6 @@ def _reset_billing_db_for_tests() -> None:
 
     _db._conn = None
     _db.init_db()
-    _db.init_db(_db.DEFAULT_DB_PATH)
 
 
 # --- Provider catalog + cost comparison -----------------------------------
@@ -537,7 +551,6 @@ async def billing_provision_cheapest(
         "NEMOGUARDIAN_API_KEY": auth.raw_key,
         "STRIPE_CUSTOMER_ID": auth.customer.stripe_customer_id or "",
         "NEMOGUARDIAN_CUSTOMER_ID": str(auth.customer.id),
-        "CASCADE_MODE": "standard",
     }
     try:
         offer, instance = await provision_cheapest_fit(
@@ -607,7 +620,6 @@ async def billing_provision_specific(
         "NEMOGUARDIAN_API_KEY": auth.raw_key,
         "STRIPE_CUSTOMER_ID": auth.customer.stripe_customer_id or "",
         "NEMOGUARDIAN_CUSTOMER_ID": str(auth.customer.id),
-        "CASCADE_MODE": "standard",
     }
     try:
         instance = await provider.provision(

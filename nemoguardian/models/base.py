@@ -6,7 +6,10 @@ and nemotron_csr.py. All models must:
 - report their HF id
 - load lazily (only on first call)
 - expose `moderate(...)` returning a ModelVerdict
-- never raise on inference errors — surface them via `error` field
+- never raise on inference errors — surface them via `error` field. Errored
+  verdicts are EXCLUDED from aggregation (they don't vote safe or unsafe);
+  if every model errors, the aggregator applies NEMOGUARDIAN_FAIL_MODE
+  (default: fail-closed → unsafe). See nemoguardian/aggregator.py.
 """
 
 from __future__ import annotations
@@ -75,9 +78,11 @@ class ModerationModel(abc.ABC):
                 error=None,
             )
         except Exception as exc:
+            # The label here is inert: verdicts carrying `error` are excluded
+            # from aggregation entirely (see aggregator.py failure contract).
             return ModelVerdict(
                 model_id=self.model_id,
-                verdict=VerdictLabel.SAFE,  # fail-open: better wrong-safe than wrong-block
+                verdict=VerdictLabel.SAFE,
                 score=0.0,
                 categories=[],
                 reasoning=None,

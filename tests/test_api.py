@@ -197,6 +197,10 @@ def test_stream_moderation_is_authenticated_and_metered(client):
     assert lines[0]["verdict_so_far"] == "safe"
     assert lines[1]["verdict_so_far"] == "unsafe"
     assert lines[-1]["is_terminal"] is True
+    # Terminal chunk reflects the worst verdict seen in the stream, not a
+    # hardcoded "safe".
+    assert lines[-1]["verdict_so_far"] == "unsafe"
+    assert lines[-1]["score_so_far"] == pytest.approx(0.80)
 
     from nemoguardian.billing import db as billing_db
     from nemoguardian.billing import metered as billing_metered

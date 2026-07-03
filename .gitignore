@@ -25,6 +25,12 @@ htmlcov/
 demo-evidence*.json
 framework-evidence*.json
 
+# Local working artifacts — session reports and checklists, never for the public repo
+00_repo_status.html
+nemoguardian-audit-review.html
+PUBLIC_POST_CHECKLIST.md
+README.bak.md
+
 # Editor / OS
 .vscode/
 .idea/
