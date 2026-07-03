@@ -21,7 +21,10 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import tomllib
+try:
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:  # Python 3.10 — use the tomli backport
+    import tomli as tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 

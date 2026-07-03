@@ -57,6 +57,8 @@ dev = [
   "pytest-cov>=4.1",
   "ruff>=0.3",
   "mypy>=1.8",
+  # tomllib backport for the CI build-check script on Python 3.10.
+  "tomli>=2.0; python_version < '3.11'",
 ]
 gpu = ["vllm>=0.4.6.post1"]
 
