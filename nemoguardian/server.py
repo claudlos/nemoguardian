@@ -44,7 +44,7 @@ from nemoguardian.providers import (
     list_providers as providers_list,
 )
 from nemoguardian.providers.base import CASCADE_VRAM_COMFORT_GB, ProvisionError
-from nemoguardian.providers.registry import default_registry as providers_registry
+from nemoguardian.providers.registry import get_registry as providers_registry
 from nemoguardian.schemas import (
     HealthResponse,
     ModerateRequest,
@@ -164,19 +164,12 @@ async def moderate(
             },
         )
 
-    cascade = get_cascade()
-    policies = get_policies()
-
-    policy_engine = _resolve_policy_engine(
-        policies,
+    result = await _run_moderation(
+        request,
         policy_preset=policy_preset,
         policy_yaml=policy_yaml,
+        error_label="moderation_failed",
     )
-
-    try:
-        result = await asyncio.to_thread(cascade.moderate, request, policy_engine=policy_engine)
-    except Exception as exc:
-        raise _client_error(500, what="moderation_failed", exc=exc) from exc
 
     billing_metered.report_usage(
         auth.customer.id,
@@ -197,17 +190,12 @@ async def demo_moderate(
     if not _demo_endpoint_enabled():
         raise HTTPException(404, "demo endpoint disabled")
 
-    cascade = get_cascade()
-    policy_engine = _resolve_policy_engine(
-        get_policies(),
+    return await _run_moderation(
+        request,
         policy_preset=policy_preset,
         policy_yaml=policy_yaml,
+        error_label="demo_moderation_failed",
     )
-
-    try:
-        return await asyncio.to_thread(cascade.moderate, request, policy_engine=policy_engine)
-    except Exception as exc:
-        raise _client_error(500, what="demo_moderation_failed", exc=exc) from exc
 
 
 @app.post("/v1/moderate/stream")
@@ -292,6 +280,26 @@ async def moderate_stream(
                 )
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")
+
+
+async def _run_moderation(
+    request: ModerateRequest,
+    *,
+    policy_preset: str | None,
+    policy_yaml: str | None,
+    error_label: str,
+) -> ModerateResponse:
+    """Shared moderate flow: resolve policy, off-load inference, sanitize errors."""
+    cascade = get_cascade()
+    policy_engine = _resolve_policy_engine(
+        get_policies(),
+        policy_preset=policy_preset,
+        policy_yaml=policy_yaml,
+    )
+    try:
+        return await asyncio.to_thread(cascade.moderate, request, policy_engine=policy_engine)
+    except Exception as exc:
+        raise _client_error(500, what=error_label, exc=exc) from exc
 
 
 def _yaml_safe_load(s: str) -> dict:
@@ -480,14 +488,6 @@ async def billing_list_plans() -> dict:
     }
 
 
-def _reset_billing_db_for_tests() -> None:
-    """Drop + recreate the SQLite DB. Only used in tests."""
-    from nemoguardian.billing import db as _db
-
-    _db._conn = None
-    _db.init_db()
-
-
 # --- Provider catalog + cost comparison -----------------------------------
 
 
@@ -530,6 +530,50 @@ async def providers_offers(
     }
 
 
+def _provision_env(auth: billing_auth.AuthContext) -> dict[str, str]:
+    """Environment injected into a provisioned self-hosted instance."""
+    return {
+        "NEMOGUARDIAN_API_KEY": auth.raw_key,
+        "STRIPE_CUSTOMER_ID": auth.customer.stripe_customer_id or "",
+        "NEMOGUARDIAN_CUSTOMER_ID": str(auth.customer.id),
+    }
+
+
+def _require_self_hosted(auth: billing_auth.AuthContext) -> None:
+    if "deploy.self_hosted" not in auth.plan.features:
+        raise HTTPException(
+            status_code=402,
+            detail="self-hosted provisioning requires the self_hosted plan; "
+                   "upgrade at /billing/checkout?plan=self_hosted",
+        )
+
+
+def _persist_provision_response(
+    auth: billing_auth.AuthContext, provider_name: str, instance
+) -> ProvisioningResponse:
+    """Persist a provisioning job for the instance and build the API response."""
+    status = "live" if instance.state.value == "live" else "provisioning"
+    job = billing_db.create_provisioning_job(
+        customer_id=auth.customer.id,
+        tier=auth.plan.tier,
+        provider=provider_name,
+    )
+    billing_db.update_provisioning_job(
+        job.id,
+        status=status,
+        instance_id=instance.instance_id,
+        endpoint_url=instance.endpoint_url,
+        ssh_command=instance.ssh_command,
+    )
+    return ProvisioningResponse(
+        job_id=job.id,
+        status=status,
+        instance_id=instance.instance_id,
+        endpoint_url=instance.endpoint_url,
+        ssh_command=instance.ssh_command,
+    )
+
+
 @app.post("/billing/provision/cheapest")
 async def billing_provision_cheapest(
     auth: billing_auth.AuthContext = Depends(billing_auth.require_api_key),
@@ -541,49 +585,19 @@ async def billing_provision_cheapest(
 
     This is the headline demo endpoint: "give me the cheapest GPU that fits."
     """
-    if "deploy.self_hosted" not in auth.plan.features:
-        raise HTTPException(
-            status_code=402,
-            detail="self-hosted provisioning requires the self_hosted plan; "
-                   "upgrade at /billing/checkout?plan=self_hosted",
-        )
-    env = {
-        "NEMOGUARDIAN_API_KEY": auth.raw_key,
-        "STRIPE_CUSTOMER_ID": auth.customer.stripe_customer_id or "",
-        "NEMOGUARDIAN_CUSTOMER_ID": str(auth.customer.id),
-    }
+    _require_self_hosted(auth)
     try:
         offer, instance = await provision_cheapest_fit(
             ssh_public_key=billing_provisioning.validate_ssh_public_key(ssh_public_key),
             image=image,
-            env=env,
+            env=_provision_env(auth),
             max_price_usd=max_price_usd,
         )
     except Exception as exc:
         raise _client_error(502, what="provisioning_failed", exc=exc) from exc
 
     # Persist the job so the customer can poll status.
-    provider_enum = ProviderName(offer.provider.value)
-    job = billing_db.create_provisioning_job(
-        customer_id=auth.customer.id,
-        tier=auth.plan.tier,
-        provider=provider_enum.value,
-    )
-    billing_db.update_provisioning_job(
-        job.id,
-        status="live" if instance.state.value == "live" else "provisioning",
-        instance_id=instance.instance_id,
-        endpoint_url=instance.endpoint_url,
-        ssh_command=instance.ssh_command,
-    )
-
-    return ProvisioningResponse(
-        job_id=job.id,
-        status="live" if instance.state.value == "live" else "provisioning",
-        instance_id=instance.instance_id,
-        endpoint_url=instance.endpoint_url,
-        ssh_command=instance.ssh_command,
-    )
+    return _persist_provision_response(auth, ProviderName(offer.provider.value).value, instance)
 
 
 @app.post("/billing/provision/{provider_name}")
@@ -597,11 +611,7 @@ async def billing_provision_specific(
     image: Annotated[str, Body()] = "nemoguardian/self-hosted:latest",
 ) -> ProvisioningResponse:
     """Provision on a specific provider (e.g. 'hetzner', 'digitalocean')."""
-    if "deploy.self_hosted" not in auth.plan.features:
-        raise HTTPException(
-            status_code=402,
-            detail="self-hosted provisioning requires the self_hosted plan",
-        )
+    _require_self_hosted(auth)
     try:
         provider_enum = ProviderName(provider_name)
     except ValueError as exc:
@@ -616,39 +626,17 @@ async def billing_provision_specific(
         raise HTTPException(404, f"no fitting offers on {provider_name} for that filter")
     offer = next((o for o in fits if o.offer_id == offer_id), fits[0])
 
-    env = {
-        "NEMOGUARDIAN_API_KEY": auth.raw_key,
-        "STRIPE_CUSTOMER_ID": auth.customer.stripe_customer_id or "",
-        "NEMOGUARDIAN_CUSTOMER_ID": str(auth.customer.id),
-    }
     try:
         instance = await provider.provision(
             offer,
             ssh_public_key=billing_provisioning.validate_ssh_public_key(ssh_public_key),
             image=image,
-            env=env,
+            env=_provision_env(auth),
         )
     except ProvisionError as exc:
         raise _client_error(502, what=f"{provider_name}_provisioning_failed", exc=exc) from exc
 
-    job = billing_db.create_provisioning_job(
-        customer_id=auth.customer.id, tier=auth.plan.tier, provider=provider_name,
-    )
-    billing_db.update_provisioning_job(
-        job.id,
-        status="live" if instance.state.value == "live" else "provisioning",
-        instance_id=instance.instance_id,
-        endpoint_url=instance.endpoint_url,
-        ssh_command=instance.ssh_command,
-    )
-
-    return ProvisioningResponse(
-        job_id=job.id,
-        status="live" if instance.state.value == "live" else "provisioning",
-        instance_id=instance.instance_id,
-        endpoint_url=instance.endpoint_url,
-        ssh_command=instance.ssh_command,
-    )
+    return _persist_provision_response(auth, provider_name, instance)
 
 
 # --- Demo UI --------------------------------------------------------------

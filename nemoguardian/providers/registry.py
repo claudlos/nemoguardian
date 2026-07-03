@@ -42,11 +42,16 @@ def default_registry() -> Registry:
 _REGISTRY: Registry | None = None
 
 
-def _get_registry() -> Registry:
+def get_registry() -> Registry:
+    """Memoized default registry — the one the API should use."""
     global _REGISTRY
     if _REGISTRY is None:
         _REGISTRY = default_registry()
     return _REGISTRY
+
+
+# Backwards-compatible private alias.
+_get_registry = get_registry
 
 
 def list_providers() -> list[ProviderCatalogEntry]:
@@ -55,7 +60,7 @@ def list_providers() -> list[ProviderCatalogEntry]:
 
 
 def get_provider(name: ProviderName) -> GPUProvider:
-    return _get_registry().get(name)
+    return get_registry().get(name)
 
 
 async def provision_cheapest_fit(
@@ -80,7 +85,7 @@ async def provision_cheapest_fit(
         ProviderName.DIGITAL_OCEAN,
         ProviderName.LYCEUM,
     ]
-    reg = _get_registry()
+    reg = get_registry()
 
     # Collect ALL viable offers across providers, pick cheapest.
     all_offers: list[Offer] = []
@@ -107,6 +112,7 @@ async def provision_cheapest_fit(
 __all__ = [
     "default_registry",
     "get_provider",
+    "get_registry",
     "list_providers",
     "provision_cheapest_fit",
 ]

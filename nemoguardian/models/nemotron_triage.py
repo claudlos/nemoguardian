@@ -105,6 +105,9 @@ class NemotronTriage:
             b_reasoning=(csr_verdict.reasoning or "")[:400],
             policy=policy or "(no custom policy)",
         )
+        import os
+
+        timeout_s = float(os.environ.get("NEMOGUARDIAN_TRIAGE_TIMEOUT_S", "30"))
         start = time.perf_counter()
         try:
             resp = self._client.chat.completions.create(
@@ -112,6 +115,7 @@ class NemotronTriage:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
                 max_tokens=256,
+                timeout=timeout_s,
             )
             content = resp.choices[0].message.content or ""
             latency = (time.perf_counter() - start) * 1000.0

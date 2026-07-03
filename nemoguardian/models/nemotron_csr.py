@@ -15,8 +15,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from nemoguardian.models.base import ModerationModel
+from nemoguardian.models.base import ModerationModel, resolve_revision
 from nemoguardian.schemas import VerdictLabel
+
+# Pinned HF revision (full commit SHA, fetched 2026-07-03); see resolve_revision.
+DEFAULT_CSR_REVISION = "29da6ec41d9c710d937afcd41f65e241ab822792"
 
 _PROMPT_HARM_RE = re.compile(r"Prompt harm: (harmful|unharmful)")
 _RESPONSE_HARM_RE = re.compile(r"Response Harm: (harmful|unharmful)")
@@ -76,7 +79,10 @@ class NemotronCSR(ModerationModel):
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
-        kwargs: dict[str, Any] = {"torch_dtype": "auto", "device_map": "auto"}
+        revision = resolve_revision(
+            self.model_name, self.DEFAULT_MODEL, "NEMOGUARDIAN_CSR_REVISION", DEFAULT_CSR_REVISION
+        )
+        kwargs: dict[str, Any] = {"torch_dtype": "auto", "device_map": "auto", "revision": revision}
         if self.load_in_4bit:
             from transformers import BitsAndBytesConfig
 
@@ -84,7 +90,7 @@ class NemotronCSR(ModerationModel):
                 load_in_4bit=True,
                 bnb_4bit_compute_dtype=torch.float16,
             )
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, revision=revision)
         self.model = AutoModelForCausalLM.from_pretrained(self.model_name, **kwargs)
         self.model.eval()
 
@@ -136,6 +142,10 @@ class NemotronCSR(ModerationModel):
 
         prompt_match = _PROMPT_HARM_RE.search(content)
         response_match = _RESPONSE_HARM_RE.search(content)
+        if prompt_match is None and response_match is None:
+            # A silent default here would let format drift vote "safe". Raising
+            # turns it into an error verdict, which the aggregator excludes.
+            raise ValueError(f"unparseable Nemotron-CSR output: {content[:200]!r}")
 
         # Pick the worse of (prompt, response) harm.
         prompt_harmful = prompt_match and prompt_match.group(1) == "harmful"
