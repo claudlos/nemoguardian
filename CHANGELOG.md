@@ -4,9 +4,10 @@ All notable changes to **nemoguardian** are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/). The first public release is **1.0.0**
 (the hackathon submission).
 
-## [Unreleased]
+## [1.1.0] — 2026-07-03
 
-Reconciliation of a parallel hardening line onto the v1.0.0 release.
+Reconciliation of a parallel hardening line onto the v1.0.0 release: closes the
+NMG-009 provisioning master-key leak and lands the correctness/CI hardening.
 
 ### Security
 - **NMG-009 master-key leak fixed:** provisioning endpoints no longer inject the

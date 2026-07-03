@@ -10,7 +10,8 @@
 | Version | Supported |
 | ------- | --------- |
 | `main`  | ✅ Active |
-| `v1.0.0` | ✅ Latest release |
+| `v1.1.0` | ✅ Latest release |
+| `v1.0.0` | ⚠️ Superseded (contains the NMG-009 provisioning key leak; upgrade to v1.1.0) |
 
 ## Reporting a vulnerability
 

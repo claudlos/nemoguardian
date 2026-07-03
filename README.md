@@ -1,7 +1,7 @@
 # nemoguardian
 
 [![CI](https://github.com/claudlos/nemoguardian/actions/workflows/ci.yml/badge.svg)](https://github.com/claudlos/nemoguardian/actions/workflows/ci.yml)
-[![Release v1.0](https://img.shields.io/badge/release-v1.0.0-blue)](https://github.com/claudlos/nemoguardian/releases/tag/v1.0.0)
+[![Release v1.1](https://img.shields.io/badge/release-v1.1.0-blue)](https://github.com/claudlos/nemoguardian/releases/tag/v1.1.0)
 [![License Apache-2.0](https://img.shields.io/badge/license-Apache_2.0-green)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
 
@@ -512,7 +512,8 @@ retain their own licenses and terms; see `docs/THIRD_PARTY_MODELS.md` and
 
 ## Releases
 
-This is **v1.0.0**, the hackathon submission. See
+This is **v1.1.0** — the hackathon submission (v1.0.0) plus a security and
+correctness hardening pass (closes the NMG-009 provisioning key leak). See
 [`CHANGELOG.md`](CHANGELOG.md) for what shipped and follow the
 [release tags](https://github.com/claudlos/nemoguardian/releases) for
 follow-up work.
