@@ -27,6 +27,24 @@ def test_cascade_config_from_env(monkeypatch):
     assert config.reasoning is False
 
 
+def test_console_entry_point_resolves():
+    """pyproject's [project.scripts] must point at an importable callable."""
+    import re
+    from importlib import import_module
+    from pathlib import Path
+
+    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    # No tomllib on 3.10 — pull the script target with a regex.
+    match = re.search(
+        r'^nemoguardian\s*=\s*"([\w.]+):(\w+)"\s*$',
+        pyproject.read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    assert match, "nemoguardian console script missing from pyproject.toml"
+    module = import_module(match.group(1))
+    assert callable(getattr(module, match.group(2)))
+
+
 def test_triage_status_prefers_openrouter_when_only_openrouter_key_is_set(monkeypatch):
     monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
     monkeypatch.delenv("NVIDIA_BASE_URL", raising=False)

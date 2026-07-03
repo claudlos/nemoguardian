@@ -19,6 +19,20 @@ def isolated_db(monkeypatch, tmp_path):
     db._conn = None
 
 
+def test_default_db_path_not_in_tmp(monkeypatch):
+    """NMG-007: outside Docker the DB (API-key hashes) must not land in /tmp."""
+    monkeypatch.delenv("NEMOGUARDIAN_DB_PATH", raising=False)
+    path = db.default_db_path()
+    assert "/tmp" not in str(path).replace("\\", "/")
+    assert path.name == "nemoguardian.db"
+    assert path.parent.name == ".nemoguardian"
+
+
+def test_default_db_path_env_override(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEMOGUARDIAN_DB_PATH", str(tmp_path / "custom.db"))
+    assert db.default_db_path() == tmp_path / "custom.db"
+
+
 def test_upsert_customer_creates_then_updates():
     a = db.upsert_customer(email="a@example.com")
     assert a.id >= 1
