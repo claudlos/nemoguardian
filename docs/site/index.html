@@ -293,10 +293,11 @@ $ curl -X POST http://localhost:8000/v1/moderate \
     <div>
       <h2>Security posture</h2>
       <p>
-        This is a hackathon submission. The first audit closed the critical issues — webhook trust-on-empty-secret,
-        raw API key in webhook responses, and demo-endpoint-on-by-default. The remaining open items
-        (rate limiting, container-as-root, verbose errors, SQLite hygiene, SSH-key shell interpolation) are
-        documented and tracked.
+        This project has had two internal security passes (NMG-001 → NMG-013). Everything is fixed —
+        webhook signature verification and replay idempotency, non-root container, CORS allowlist,
+        SSH-key validation, sanitized errors, per-key rate limiting, scoped instance tokens, pinned
+        model revisions — except one: adversarial robustness of the guard models themselves (NMG-006),
+        which has a prepared eval harness in <code>eval/</code> awaiting a GPU run.
       </p>
       <p>
         Production deployments should run behind an authenticated reverse proxy, set
@@ -308,11 +309,11 @@ $ curl -X POST http://localhost:8000/v1/moderate \
     <div class="status-card">
       <h3>Audit status</h3>
       <ul class="status-list">
-        <li><span class="ok">✓</span> Webhook trust-on-empty-secret — fixed (fail-closed)</li>
-        <li><span class="ok">✓</span> Raw API key in webhook response — fixed (returns id only)</li>
-        <li><span class="ok">✓</span> Demo endpoint on by default — fixed (opt-in)</li>
-        <li><span class="warn">~</span> Webhook replay protection — partial (300s tolerance; idempotency pending)</li>
-        <li><span class="open">·</span> CORS wildcard, prompt injection, rate limiting, container hardening — tracked</li>
+        <li><span class="ok">✓</span> Webhook signature + replay idempotency — fixed (fail-closed, event-id dedup)</li>
+        <li><span class="ok">✓</span> CORS allowlist, non-root container, sanitized errors — fixed</li>
+        <li><span class="ok">✓</span> Rate limiting per API key — fixed (token bucket, 429 + Retry-After)</li>
+        <li><span class="ok">✓</span> Scoped instance tokens — fixed (master key never leaves the control plane)</li>
+        <li><span class="open">·</span> Adversarial eval of the guard models (NMG-006) — harness ready, run pending</li>
       </ul>
     </div>
   </div>
