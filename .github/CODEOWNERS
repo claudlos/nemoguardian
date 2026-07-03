@@ -1,0 +1,26 @@
+# CODEOWNERS
+# Auto-request review from the listed owners when files change.
+# See https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything
+*                                   @claudlos
+
+# Core moderation IP — extra scrutiny
+/nemoguardian/cascade.py             @claudlos
+/nemoguardian/aggregator.py          @claudlos
+/nemoguardian/policy/                @claudlos
+
+# Billing / auth / webhooks
+/nemoguardian/billing/               @claudlos
+
+# Server routes
+/nemoguardian/server.py              @claudlos
+
+# GPU provider registry
+/nemoguardian/providers/             @claudlos
+
+# Dockerfile + compose + security-sensitive config
+/Dockerfile                          @claudlos
+/docker-compose.yml                  @claudlos
+/.github/dependabot.yml              @claudlos
+/SECURITY.md                         @claudlos

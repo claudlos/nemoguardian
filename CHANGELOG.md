@@ -4,6 +4,42 @@ All notable changes to **nemoguardian** are recorded here. Versions follow
 [Semantic Versioning](https://semver.org/). The first public release is **1.0.0**
 (the hackathon submission).
 
+## [Unreleased]
+
+Reconciliation of a parallel hardening line onto the v1.0.0 release.
+
+### Security
+- **NMG-009 master-key leak fixed:** provisioning endpoints no longer inject the
+  caller's raw master API key into rented GPU VMs. A moderation-only
+  `instance`-scoped key is minted per VM, tied to the job, and revoked if the
+  provision fails. `require_full_scope` rejects instance-scoped keys (403) on
+  key-management, portal, and provisioning routes.
+- Default HF model checkpoints pinned by full commit SHA (`revision=`), overridable
+  via `NEMOGUARDIAN_*_REVISION`.
+- `starlette>=1.3.1` floor (PYSEC-2026-248/249, CVE-2026-48817/48818).
+- CI hardened: Python 3.10/3.11/3.12 matrix, Docker build job, gitleaks
+  (full history), CodeQL, and pip-audit — alongside the existing offline guards.
+- Added SECURITY.md, issue/PR templates, CODEOWNERS, dependabot, CONTRIBUTING.
+
+### Changed
+- **Fail-closed aggregation:** when no model produces a usable verdict (all
+  errored, or the request disabled every model), the cascade returns UNSAFE by
+  default (`NEMOGUARDIAN_FAIL_MODE=open` restores a safe pass-through). Previously
+  all-errored returned CONTROVERSIAL and an empty verdict set returned SAFE.
+- Qwen3Guard output parsing raises on format drift instead of silently voting Safe.
+- `/v1/moderate/stream` bills after tokens are delivered (was up-front) and the
+  terminal chunk reports the worst verdict seen (was hardcoded safe).
+- Stripe usage push prefers Billing Meter Events with a legacy fallback; webhook
+  subscription-period parsing handles item-level `current_period_*` (API 2025-03+).
+- SQLite billing DB defaults to `~/.nemoguardian` (0700/0600) outside Docker, with
+  WAL + busy_timeout; blocking billing/auth calls moved off the event loop.
+- Rate limiting now also covers `/billing/keys`; coverage gate added to `make test`.
+
+### Fixed
+- Broken `nemoguardian` console entry point (`[project.scripts]` target didn't exist).
+- `/providers/offers` and provisioning reused the memoized provider registry.
+- Removed the dead `NEMOGUARDIAN_CASCADE_MODE` env var.
+
 ## [1.0.0] — 2026-06-30
 
 First public release, submitted to the **Hermes Agent Accelerated Business

@@ -1,0 +1,9 @@
+# gitleaks ignore list — keep this EMPTY in normal operation.
+#
+# Each line is a gitleaks fingerprint for a finding that has been reviewed and
+# deemed a false positive (e.g. a test fixture that must contain a key-shaped
+# string). Committing a real fingerprint here is almost always wrong: rotate the
+# secret and rewrite history instead.
+#
+# Format: one fingerprint per line, e.g.
+#   9d3b4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3:filename:rule_id

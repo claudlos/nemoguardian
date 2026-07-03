@@ -1,4 +1,4 @@
-.PHONY: install-dev lint test verify serve smoke smoke-deep platform-smoke eval triage-api-smoke demo-check framework-smoke discord-env-setup discord-live-smoke discord-actor-scenario pre-submit-local final-submission-check docker-build docker-run link-check secret-scan build-check ci-guards
+.PHONY: install-dev lint test verify serve smoke smoke-deep platform-smoke eval triage-api-smoke demo-check framework-smoke discord-env-setup discord-live-smoke discord-actor-scenario pre-submit-local final-submission-check docker-build docker-run link-check secret-scan build-check ci-guards lock
 
 PYTHON ?= .venv/bin/python
 PORT ?= 8000
@@ -22,9 +22,14 @@ lint:
 	$(PYTHON) -m ruff check .
 
 test:
-	$(PYTHON) -m pytest -q
+	$(PYTHON) -m pytest -q --cov=nemoguardian --cov-report=term-missing --cov-fail-under=90
 
 verify: lint test
+
+# Snapshot resolved dependency versions for reproducible installs.
+# Run on Linux (the deploy platform) — a Windows/macOS freeze pins wrong wheels.
+lock:
+	$(PYTHON) -m pip freeze --exclude-editable > constraints.txt
 
 # Offline CI reproducibility guards (no network / GPU / secrets).
 link-check:

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security disclosure
+    url: https://github.com/claudlos/nemoguardian/blob/main/SECURITY.md
+    about: Please do not file security bugs as public issues.
+  - name: Judge guide
+    url: https://github.com/claudlos/nemoguardian/blob/main/docs/JUDGE_GUIDE.md
+    about: Fast review path for hackathon judges.
+  - name: Discussions
+    url: https://github.com/claudlos/nemoguardian/discussions
+    about: For usage questions, ideas, and show-and-tell.
