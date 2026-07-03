@@ -467,7 +467,10 @@ class StrikeLedger(_JsonlStore):
         strikes = self._active_strikes(
             platform=platform, workspace_id=workspace_id, user_id=user_id, since=since
         )
-        strikes.sort(key=lambda e: (e.created_at, e.strike_id))
+        # Stable sort on the timestamp alone: _active_strikes yields events in
+        # append (insertion) order, so equal-timestamp strikes keep that order.
+        # A secondary key on the random strike_id would reorder ties randomly.
+        strikes.sort(key=lambda e: e.created_at)
         return strikes
 
     def total(
