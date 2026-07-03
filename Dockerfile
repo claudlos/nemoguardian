@@ -15,27 +15,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /opt/nemoguardian
 
-# Python deps first (cache layer)
-COPY pyproject.toml ./
+# Python deps first (cache layer). pyproject.toml is the single source of truth
+# for dependencies — the stub __init__ lets `pip install .` resolve them before
+# the full source is copied, so this layer only rebuilds when pyproject changes.
+COPY pyproject.toml README.md LICENSE NOTICE ./
 COPY nemoguardian/__init__.py nemoguardian/__init__.py
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip wheel \
-    && /opt/venv/bin/pip install \
-        "fastapi>=0.110" \
-        "uvicorn[standard]>=0.27" \
-        "pydantic>=2.6" \
-        "httpx>=0.27" \
-        "openai>=1.0" \
-        "pyyaml>=6.0" \
-        "stripe>=8.0" \
-        "transformers>=4.51.0" \
-        "torch>=2.2" \
-        "accelerate>=0.27" \
-        "bitsandbytes>=0.43" \
-        "tenacity>=8.2" \
-        "structlog>=24.1" \
-        "typer>=0.12" \
-        "numpy>=1.26"
+    && /opt/venv/bin/pip install .
 
 ENV PATH="/opt/venv/bin:${PATH}"
 
@@ -44,7 +31,9 @@ COPY nemoguardian ./nemoguardian
 COPY demo ./demo
 COPY docs ./docs
 COPY scripts ./scripts
-COPY README.md SUBMISSION.md LICENSE NOTICE ./
+COPY SUBMISSION.md ./
+# Re-install the (now complete) package over the dep-resolution stub.
+RUN /opt/venv/bin/pip install --no-deps --force-reinstall .
 
 # Create an unprivileged runtime user and give it ownership of the app tree and
 # the HuggingFace cache so model weights download on first boot. Build steps run

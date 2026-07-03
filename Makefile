@@ -1,4 +1,4 @@
-.PHONY: install-dev lint test verify serve smoke smoke-deep demo-check framework-smoke pre-submit-local final-submission-check docker-build docker-run
+.PHONY: install-dev lint test verify serve smoke smoke-deep demo-check framework-smoke pre-submit-local final-submission-check docker-build docker-run lock
 
 PYTHON ?= .venv/bin/python
 PORT ?= 8000
@@ -48,3 +48,8 @@ docker-build:
 
 docker-run:
 	docker run --rm --gpus all --env-file .env -p $(PORT):8000 $(IMAGE)
+
+# Snapshot resolved dependency versions for reproducible installs.
+# Run on Linux (the deploy platform) — a Windows/macOS freeze pins wrong wheels.
+lock:
+	$(PYTHON) -m pip freeze --exclude-editable > constraints.txt
