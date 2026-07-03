@@ -12,11 +12,27 @@ and nemotron_csr.py. All models must:
 from __future__ import annotations
 
 import abc
+import os
 import threading
 import time
 from typing import Any
 
 from nemoguardian.schemas import ModelVerdict, VerdictLabel
+
+
+def resolve_revision(
+    model_name: str, default_model: str, env_var: str, default_revision: str
+) -> str | None:
+    """HF revision to pin for `from_pretrained` (reproducible, tamper-resistant).
+
+    The env var always wins. The built-in pinned SHA applies only to the default
+    checkpoint; a custom NEMOGUARDIAN_*_MODEL override floats on `main` unless
+    its revision env var is also set.
+    """
+    env = os.environ.get(env_var)
+    if env:
+        return env
+    return default_revision if model_name == default_model else None
 
 # Process-wide lock serializing first-time model loads. The cascade loads the
 # local guards concurrently, and a transformers _LazyModule does NOT tolerate

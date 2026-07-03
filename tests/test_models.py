@@ -158,8 +158,9 @@ def _install_fake_transformers(
 
     class AutoTokenizer:
         @staticmethod
-        def from_pretrained(model_name: str) -> FakeTokenizer:
+        def from_pretrained(model_name: str, **kwargs: Any) -> FakeTokenizer:
             calls["tokenizer_model_name"] = model_name
+            calls.setdefault("tokenizer_kwargs", []).append(kwargs)
             return tokenizer
 
     class AutoModelForCausalLM:
@@ -286,6 +287,28 @@ def test_qwen_parse_gen_output_extracts_label_categories_and_refusal():
         _parse_gen_output("no structured output")
 
 
+def test_default_model_load_pins_revision(monkeypatch):
+    from nemoguardian.models.qwen3_guard import DEFAULT_GEN_REVISION
+
+    _install_fake_torch(monkeypatch)
+    calls = _install_fake_transformers(monkeypatch, decoded="Safety: Safe\nNone")
+    monkeypatch.delenv("NEMOGUARDIAN_QWEN_REVISION", raising=False)
+
+    # The default checkpoint loads with its pinned commit SHA.
+    Qwen3GuardGen(Qwen3GuardGen.DEFAULT_MODEL).moderate("x")
+    assert calls["causal_kwargs"][0]["revision"] == DEFAULT_GEN_REVISION
+    assert calls["tokenizer_kwargs"][0]["revision"] == DEFAULT_GEN_REVISION
+
+
+def test_revision_env_override(monkeypatch):
+    _install_fake_torch(monkeypatch)
+    calls = _install_fake_transformers(monkeypatch, decoded="Safety: Safe\nNone")
+    monkeypatch.setenv("NEMOGUARDIAN_QWEN_REVISION", "abc123")
+
+    Qwen3GuardGen(Qwen3GuardGen.DEFAULT_MODEL).moderate("x")
+    assert calls["causal_kwargs"][0]["revision"] == "abc123"
+
+
 def test_qwen_gen_loads_fake_model_and_parses_response(monkeypatch):
     _install_fake_torch(monkeypatch)
     calls = _install_fake_transformers(
@@ -334,7 +357,10 @@ def test_qwen_stream_classifies_fake_token_logits(monkeypatch):
     assert rows == [("unsafe", 0.85, 0), ("safe", 0.8, 1), ("controversial", 0.7, 2)]
     assert stream._loaded is True
     assert calls["token_model_name"] == "fake-stream"
-    assert calls["token_kwargs"] == [{"torch_dtype": "float32", "device_map": "auto"}]
+    # A custom (non-default) model floats on main: revision resolves to None.
+    assert calls["token_kwargs"] == [
+        {"torch_dtype": "float32", "device_map": "auto", "revision": None}
+    ]
     assert calls["token_model"].eval_called is True
     assert calls["tokenizer"].calls[0]["value"] == "abc"
     assert calls["tokenizer"].calls[0]["truncation"] is True

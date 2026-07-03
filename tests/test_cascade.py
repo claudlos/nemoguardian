@@ -346,8 +346,11 @@ def test_standard_mode_respects_model_toggles():
         )
     )
 
-    assert result.verdict == VerdictLabel.SAFE
+    # Toggles are respected — no model runs — but with every model disabled
+    # there is nothing to vouch for, so the fail-closed default returns UNSAFE
+    # (NEMOGUARDIAN_FAIL_MODE=open restores a safe pass-through).
     assert result.model_verdicts == {}
+    assert result.verdict == VerdictLabel.UNSAFE
 
 
 def test_deep_mode_runs_triage_when_models_available():
