@@ -153,7 +153,7 @@ async def moderate(
     # Enforce tier limits + features
     billing_auth.enforce_feature(auth, f"cascade.{request.mode.value}")
 
-    allowed, usage = billing_metered.check_allowance(auth.customer.id)
+    allowed, usage = await asyncio.to_thread(billing_metered.check_allowance, auth.customer.id)
     if not allowed:
         raise HTTPException(
             status_code=429,
@@ -180,7 +180,9 @@ async def moderate(
         logger.exception("moderation_failed", error=str(exc))
         raise HTTPException(500, f"moderation failed: {exc}") from exc
 
-    billing_metered.report_usage(
+    # Sync SQLite + (when configured) sync Stripe HTTP — keep off the event loop.
+    await asyncio.to_thread(
+        billing_metered.report_usage,
         auth.customer.id,
         call_type=request.mode.value,
         request_id=result.request_id,
@@ -224,7 +226,7 @@ async def moderate_stream(
     """
     billing_auth.enforce_feature(auth, "cascade.stream")
 
-    allowed, usage = billing_metered.check_allowance(auth.customer.id)
+    allowed, usage = await asyncio.to_thread(billing_metered.check_allowance, auth.customer.id)
     if not allowed:
         raise HTTPException(
             status_code=429,
@@ -288,7 +290,8 @@ async def moderate_stream(
             # Bill only for work actually delivered (any tokens streamed),
             # including partially-streamed requests that then errored.
             if emitted_tokens:
-                billing_metered.report_usage(
+                await asyncio.to_thread(
+                    billing_metered.report_usage,
                     auth.customer.id,
                     call_type="stream",
                     request_id=request_id,
@@ -433,7 +436,7 @@ async def billing_webhook_endpoint(request: Request) -> dict:
 @app.post("/billing/portal", response_model=PortalResponse)
 async def billing_portal_endpoint(
     req: PortalRequest,
-    auth: billing_auth.AuthContext = Depends(billing_auth.require_api_key),
+    auth: billing_auth.AuthContext = Depends(billing_auth.require_full_scope),
 ) -> PortalResponse:
     """Create a Stripe customer-portal session for plan changes and cancellation."""
     session = billing_checkout.create_portal_session(
@@ -450,7 +453,7 @@ async def billing_portal_endpoint(
 @app.post("/billing/keys", response_model=CreateKeyResponse)
 async def billing_create_key(
     req: CreateKeyRequest,
-    auth: billing_auth.AuthContext = Depends(billing_auth.require_api_key),
+    auth: billing_auth.AuthContext = Depends(billing_auth.require_full_scope),
 ) -> CreateKeyResponse:
     """Provision a new API key for the authenticated customer."""
     raw, _record = billing_db.create_api_key(auth.customer.id, label=req.label)
@@ -483,7 +486,7 @@ async def billing_usage(
 @app.post("/billing/provision", response_model=ProvisioningResponse)
 async def billing_provision(
     req: ProvisioningRequest,
-    auth: billing_auth.AuthContext = Depends(billing_auth.require_api_key),
+    auth: billing_auth.AuthContext = Depends(billing_auth.require_full_scope),
 ) -> ProvisioningResponse:
     """Self-hosted tier: provision a nemoguardian instance for this customer.
 
@@ -556,11 +559,16 @@ async def billing_provision(
                 },
             ) from exc
 
-    env = {
-        "NEMOGUARDIAN_API_KEY": auth.raw_key,
-        "STRIPE_CUSTOMER_ID": auth.customer.stripe_customer_id or "",
-        "NEMOGUARDIAN_CUSTOMER_ID": str(auth.customer.id),
-    }
+    # Only mint an instance-scoped key when we'll actually provision — an
+    # unconfirmed dry-run creates no VM and needs no credential (NMG-009).
+    if confirmed:
+        env, instance_key_id = _mint_instance_env(auth)
+    else:
+        env = {
+            "STRIPE_CUSTOMER_ID": auth.customer.stripe_customer_id or "",
+            "NEMOGUARDIAN_CUSTOMER_ID": str(auth.customer.id),
+        }
+        instance_key_id = None
     job = await billing_provisioning.provision_instance_guarded(
         customer_id=auth.customer.id,
         provider=req.provider,
@@ -573,6 +581,13 @@ async def billing_provision(
         image=req.image,
         env=env,
     )
+    if instance_key_id is not None:
+        if job.status in ("live", "provisioning"):
+            # Tie the instance-scoped key to the live job so teardown can revoke it.
+            billing_db.update_provisioning_job(job.id, api_key_id=instance_key_id)
+        else:
+            # No live instance came back — revoke the minted credential.
+            billing_db.revoke_api_key(auth.customer.id, instance_key_id)
     if reserved and job.status not in ("live", "provisioning"):
         # No live instance came back (rejected/failed) — refund the reservation
         # so a failed provision never silently burns the customer's credits.
@@ -729,9 +744,29 @@ def _gpu_credit_required_cents(hourly_price_usd: float, reserve_hours: float) ->
     return max(1, int(cents.to_integral_value(rounding=ROUND_CEILING)))
 
 
+def _mint_instance_env(auth: billing_auth.AuthContext) -> tuple[dict[str, str], int]:
+    """Environment injected into a provisioned self-hosted instance.
+
+    NMG-009: mint a moderation-only instance-scoped key for the VM instead of
+    forwarding the caller's master key. Returns (env, instance_key_id) so the
+    key can be tied to the job and revoked on failure/teardown.
+    """
+    raw, record = billing_db.create_api_key(
+        auth.customer.id,
+        label=f"instance key for customer {auth.customer.id}",
+        scope="instance",
+    )
+    env = {
+        "NEMOGUARDIAN_API_KEY": raw,
+        "STRIPE_CUSTOMER_ID": auth.customer.stripe_customer_id or "",
+        "NEMOGUARDIAN_CUSTOMER_ID": str(auth.customer.id),
+    }
+    return env, record.id
+
+
 @app.post("/billing/provision/cheapest")
 async def billing_provision_cheapest(
-    auth: billing_auth.AuthContext = Depends(billing_auth.require_api_key),
+    auth: billing_auth.AuthContext = Depends(billing_auth.require_full_scope),
     ssh_public_key: Annotated[str | None, Body()] = None,
     image: Annotated[str, Body()] = "nemoguardian/self-hosted:latest",
     max_price_usd: Annotated[float | None, Body()] = None,
@@ -776,11 +811,7 @@ async def billing_provision_cheapest(
             },
         ) from exc
 
-    env = {
-        "NEMOGUARDIAN_API_KEY": auth.raw_key,
-        "STRIPE_CUSTOMER_ID": auth.customer.stripe_customer_id or "",
-        "NEMOGUARDIAN_CUSTOMER_ID": str(auth.customer.id),
-    }
+    env, instance_key_id = _mint_instance_env(auth)
     try:
         instance = await providers_registry().get(offer.provider).provision(
             offer,
@@ -789,6 +820,8 @@ async def billing_provision_cheapest(
             env=env,
         )
     except Exception as exc:
+        # Don't leave an orphaned live credential behind a failed provision.
+        billing_db.revoke_api_key(auth.customer.id, instance_key_id)
         billing_db.record_gpu_credit_event(
             customer_id=auth.customer.id,
             event_type="provision_refund",
@@ -807,6 +840,7 @@ async def billing_provision_cheapest(
         instance_id=instance.instance_id,
         endpoint_url=instance.endpoint_url,
         ssh_command=instance.ssh_command,
+        api_key_id=instance_key_id,
     )
 
     return ProvisioningResponse(
@@ -826,7 +860,7 @@ async def billing_provision_cheapest(
 @app.post("/billing/provision/{provider_name}")
 async def billing_provision_specific(
     provider_name: str,
-    auth: billing_auth.AuthContext = Depends(billing_auth.require_api_key),
+    auth: billing_auth.AuthContext = Depends(billing_auth.require_full_scope),
     offer_id: Annotated[str | None, Body()] = None,
     gpu_model: Annotated[str | None, Body()] = None,
     max_price_usd: Annotated[float | None, Body()] = None,
@@ -879,16 +913,14 @@ async def billing_provision_specific(
             },
         ) from exc
 
-    env = {
-        "NEMOGUARDIAN_API_KEY": auth.raw_key,
-        "STRIPE_CUSTOMER_ID": auth.customer.stripe_customer_id or "",
-        "NEMOGUARDIAN_CUSTOMER_ID": str(auth.customer.id),
-    }
+    env, instance_key_id = _mint_instance_env(auth)
     try:
         instance = await provider.provision(
             offer, ssh_public_key=ssh_public_key, image=image, env=env,
         )
     except Exception as exc:
+        # Don't leave an orphaned live credential behind a failed provision.
+        billing_db.revoke_api_key(auth.customer.id, instance_key_id)
         billing_db.record_gpu_credit_event(
             customer_id=auth.customer.id,
             event_type="provision_refund",
@@ -907,6 +939,7 @@ async def billing_provision_specific(
         instance_id=instance.instance_id,
         endpoint_url=instance.endpoint_url,
         ssh_command=instance.ssh_command,
+        api_key_id=instance_key_id,
     )
 
     return ProvisioningResponse(

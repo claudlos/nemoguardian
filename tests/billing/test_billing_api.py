@@ -908,6 +908,86 @@ def test_provision_provisions_when_confirmed_and_in_cap(client, monkeypatch):
     assert billing_db.gpu_credit_balance_cents(customer.id) == 979
 
 
+def test_instance_scoped_key_can_moderate_but_not_manage(client):
+    """NMG-009: an instance-scoped key moderates but is 403 on management routes."""
+    customer = billing_db.upsert_customer(email="instkey@example.com")
+    billing_db.set_customer_tier(customer.id, Tier.SELF_HOSTED)
+    raw_instance, _ = billing_db.create_api_key(customer.id, label="vm", scope="instance")
+    headers = {"Authorization": f"Bearer {raw_instance}"}
+
+    # Can moderate.
+    r = client.post("/v1/moderate", json={"text": "hello"}, headers=headers)
+    assert r.status_code == 200, r.text
+
+    # Cannot mint keys, open the portal, or provision.
+    r = client.post("/billing/keys", json={"label": "sneaky"}, headers=headers)
+    assert r.status_code == 403
+    assert "instance-scoped" in r.json()["detail"]
+
+    r = client.post("/billing/portal", json={"return_url": "https://x.test"}, headers=headers)
+    assert r.status_code == 403
+
+    r = client.post("/billing/provision", json={"provider": "vastai"}, headers=headers)
+    assert r.status_code == 403
+
+
+def test_full_key_still_manages(client):
+    headers, _customer = _auth_headers_for_tier(Tier.SELF_HOSTED, email="fullkey@example.com")
+    r = client.post("/billing/keys", json={"label": "new"}, headers=headers)
+    assert r.status_code == 200
+    assert r.json()["api_key"].startswith("nmg_")
+
+
+def test_provision_injects_instance_scoped_key_not_master(client, monkeypatch):
+    """The caller's master key must never land in a provisioned VM's env."""
+    headers, customer = _auth_headers_for_tier(Tier.SELF_HOSTED, email="mint@example.com")
+    master_key = headers["Authorization"].split()[1]
+    offer = Offer(ProviderName.VAST_AI, "RTX 3090", 24, 0.07, "US", offer_id="fit")
+    instance = Instance(
+        provider=ProviderName.VAST_AI, instance_id="vast-live", gpu_model="RTX 3090",
+        vram_gb=24, region="US", state=InstanceState.LIVE,
+        endpoint_url="https://vast.test", ssh_command="ssh root@vast.test",
+    )
+    provider = FakeProvider([offer], instance=instance)
+    monkeypatch.setattr(srv, "providers_registry", lambda: FakeProviderRegistry([provider]))
+    _fund_gpu_credits(customer, amount_cents=1_000)
+
+    r = client.post(
+        "/billing/provision/cheapest",
+        headers=headers,
+        json={"ssh_public_key": None, "reserve_hours": 3.0},
+    )
+    assert r.status_code == 200, r.text
+    injected = provider.provision_calls[0]["env"]["NEMOGUARDIAN_API_KEY"]
+    assert injected.startswith("nmg_")
+    assert injected != master_key  # the master key stays in the control plane
+
+    found = billing_db.lookup_api_key(injected)
+    assert found is not None
+    _c, key = found
+    assert key.scope == "instance"
+    job = billing_db.get_provisioning_job(r.json()["job_id"])
+    assert job.api_key_id == key.id
+
+
+def test_provision_failure_revokes_minted_instance_key(client, monkeypatch):
+    headers, customer = _auth_headers_for_tier(Tier.SELF_HOSTED, email="mintfail@example.com")
+    offer = Offer(ProviderName.VAST_AI, "RTX 3090", 24, 0.07, "US", offer_id="fit")
+    provider = FakeProvider([offer], provision_error=ProvisionError("provider down"))
+    monkeypatch.setattr(srv, "providers_registry", lambda: FakeProviderRegistry([provider]))
+    _fund_gpu_credits(customer, amount_cents=1_000)
+
+    r = client.post(
+        "/billing/provision/cheapest",
+        headers=headers,
+        json={"ssh_public_key": None, "reserve_hours": 3.0},
+    )
+    assert r.status_code == 502
+    # The key minted for the failed VM must not survive as a usable credential.
+    injected = provider.provision_calls[0]["env"]["NEMOGUARDIAN_API_KEY"]
+    assert billing_db.lookup_api_key(injected) is None
+
+
 def test_provision_unknown_offer_id_is_404(client, monkeypatch):
     headers, _customer = _auth_headers_for_tier(
         Tier.SELF_HOSTED, email="badoffer@example.com"
