@@ -13,9 +13,9 @@
 
 **Please do not open a public GitHub issue for security bugs.**
 
-Email: **[security contact to be added]** (placeholder — replace before going public).
+Use **GitHub private vulnerability reporting**: [Report a vulnerability](https://github.com/claudlos/nemoguardian/security/advisories/new) on this repository. Reports go directly and privately to the maintainer.
 
-For the hackathon, ping `@claudlos` on the hackathon Discord. Expect an acknowledgement within 48 hours during the competition window.
+Alternatively, ping `@claudlos` on the hackathon Discord. Expect an acknowledgement within 48 hours.
 
 When reporting, please include:
 
