@@ -19,9 +19,17 @@ from pathlib import Path
 
 from nemoguardian.billing.plans import Tier, get_plan
 
-DEFAULT_DB_PATH = Path(
-    os.environ.get("NEMOGUARDIAN_DB_PATH", "/tmp/nemoguardian.db")
-)
+
+def default_db_path() -> Path:
+    """Resolve the DB path lazily so env changes (tests, late config) apply.
+
+    Outside Docker the DB holds API-key hashes, so it must not live in a
+    world-readable location like /tmp (NMG-007).
+    """
+    env = os.environ.get("NEMOGUARDIAN_DB_PATH")
+    if env:
+        return Path(env)
+    return Path.home() / ".nemoguardian" / "nemoguardian.db"
 
 
 SCHEMA = """
@@ -84,6 +92,15 @@ CREATE TABLE IF NOT EXISTS provisioning_jobs (
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS webhook_events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id        TEXT UNIQUE NOT NULL,
+    event_type      TEXT,
+    received_at     TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_events_id ON webhook_events(event_id);
 """
 
 
@@ -91,16 +108,31 @@ _lock = threading.Lock()
 _conn: sqlite3.Connection | None = None
 
 
-def init_db(path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
+def init_db(path: Path | str | None = None) -> sqlite3.Connection:
     """Initialise the database (idempotent). Returns a connection."""
     global _conn
-    path = Path(path)
+    explicit = path is not None or bool(os.environ.get("NEMOGUARDIAN_DB_PATH"))
+    path = Path(path) if path is not None else default_db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Tighten permissions on the directory we own; leave operator-chosen
+    # locations (env/explicit path) alone.
+    if os.name == "posix" and not explicit:
+        os.chmod(path.parent, 0o700)
     with _lock:
         if _conn is None:
             _conn = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
+            if os.name == "posix":
+                os.chmod(path, 0o600)
             _conn.row_factory = sqlite3.Row
-            _conn.executescript("PRAGMA foreign_keys = ON;")
+            # WAL mode tolerates concurrent readers while a write commits, and
+            # busy_timeout makes writers wait briefly instead of erroring under
+            # contention. Foreign keys stay on. Together these make the single
+            # shared connection safer if workers or threads ever overlap writes.
+            _conn.executescript(
+                "PRAGMA foreign_keys = ON;"
+                "PRAGMA journal_mode = WAL;"
+                "PRAGMA busy_timeout = 5000;"
+            )
             _conn.executescript(SCHEMA)
         return _conn
 
@@ -120,6 +152,25 @@ def _tx(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def claim_webhook_event(event_id: str, *, event_type: str | None = None) -> bool:
+    """Record a Stripe event id; return True if new, False if a duplicate.
+
+    Makes webhook handling idempotent: a replayed-but-still-fresh event (which
+    passes signature/tolerance checks) is detected here and skipped so it cannot
+    mint a second welcome API key or otherwise double-apply. Empty event ids are
+    treated as non-deduplicable (returns True) since there is nothing to key on.
+    """
+    if not event_id:
+        return True
+    conn = init_db()
+    with _tx(conn):
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO webhook_events (event_id, event_type, received_at) VALUES (?, ?, ?)",
+            (event_id, event_type, _now()),
+        )
+        return cur.rowcount == 1
 
 
 def _hash_key(raw: str) -> str:
@@ -280,8 +331,11 @@ def revoke_api_key(customer_id: int, key_id: int) -> None:
 
 def list_api_keys(customer_id: int) -> list[ApiKey]:
     conn = init_db()
+    # Name the columns explicitly so the row maps 1:1 onto the ApiKey dataclass
+    # (which deliberately omits key_hash — keys are hash-only at rest).
     rows = conn.execute(
-        "SELECT * FROM api_keys WHERE customer_id = ? ORDER BY id DESC",
+        """SELECT id, customer_id, label, created_at, last_used_at, revoked
+           FROM api_keys WHERE customer_id = ? ORDER BY id DESC""",
         (customer_id,),
     ).fetchall()
     return [ApiKey(**dict(r)) for r in rows]
@@ -487,6 +541,7 @@ __all__ = [
     "ProvisioningJob",
     "Subscription",
     "UsageSummary",
+    "claim_webhook_event",
     "create_api_key",
     "create_provisioning_job",
     "get_customer",

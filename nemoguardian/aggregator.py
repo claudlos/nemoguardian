@@ -8,20 +8,34 @@ Rules (default weights):
 - Nemotron-CSR:   0.40
 - Nemotron triage: 0.20 (only in DEEP mode, only when present)
 
-Aggregation: weighted mean of scores → threshold → label.
-- score < 0.30 → safe
-- 0.30 ≤ score < 0.70 → controversial
-- score ≥ 0.70 → unsafe
+Aggregation: weighted mean of scores → threshold → label (strict boundaries, so
+a score exactly on a threshold stays in the lower band):
+- score ≤ 0.30 → safe
+- 0.30 < score ≤ 0.70 → controversial
+- score > 0.70 → unsafe
 
 If ANY contributing model returned verdict=unsafe with score ≥ 0.50, we override
-the weighted mean and label unsafe (fail-closed on hard violations).
+the weighted mean and label unsafe.
+
+Failure contract:
+- Errored model verdicts are excluded from aggregation; partial failure degrades
+  gracefully (the surviving models decide) and is surfaced in `reasons`.
+- If NO model contributed (every model errored, or none ran), the result follows
+  `fail_mode`: "closed" (default) → unsafe, "open" → safe. Configure via
+  NEMOGUARDIAN_FAIL_MODE.
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 
 from nemoguardian.schemas import ModelVerdict, VerdictLabel
+
+
+def _fail_mode_from_env() -> str:
+    raw = os.environ.get("NEMOGUARDIAN_FAIL_MODE", "closed").strip().lower()
+    return raw if raw in {"closed", "open"} else "closed"
 
 
 @dataclass
@@ -32,6 +46,7 @@ class AggregatorConfig:
     safe_threshold: float = 0.30
     unsafe_threshold: float = 0.70
     override_on_unsafe: float = 0.50  # any model over this → unsafe regardless
+    fail_mode: str = field(default_factory=_fail_mode_from_env)  # "closed" | "open"
 
 
 @dataclass
@@ -92,6 +107,18 @@ def aggregate(
             snippet = verdict.reasoning.split("\n")[0][:160].strip()
             if snippet:
                 reasons.append(f"[{label}] {snippet}")
+
+    if weighted_total == 0 and not override_to_unsafe:
+        # Nothing contributed: every model errored, or no model ran at all.
+        if cfg.fail_mode == "open":
+            reasons.append("no model verdicts available; fail-open → safe")
+            return AggregatedVerdict(
+                verdict=VerdictLabel.SAFE, score=0.0, reasons=reasons[:6], categories=[]
+            )
+        reasons.append("no model verdicts available; fail-closed → unsafe")
+        return AggregatedVerdict(
+            verdict=VerdictLabel.UNSAFE, score=1.0, reasons=reasons[:6], categories=[]
+        )
 
     if weighted_total > 0:
         weighted_score = weighted_score / weighted_total

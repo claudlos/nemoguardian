@@ -8,8 +8,8 @@ Subscribed events:
 - customer.subscription.created       → same
 - customer.subscription.updated       → tier changes / cancellations
 - customer.subscription.deleted       → downgrade back to free
-- invoice.payment_succeeded           → record payment
-- invoice.payment_failed              → flag customer past_due
+- customer.subscription.trial_will_end → tier/status sync
+Other event types are acknowledged and ignored.
 """
 
 from __future__ import annotations
@@ -23,10 +23,13 @@ from contextlib import suppress
 from datetime import datetime, timezone
 from typing import Any
 
+import structlog
 from fastapi import HTTPException, Request, status
 
 from nemoguardian.billing import db
 from nemoguardian.billing.plans import Tier
+
+logger = structlog.get_logger("nemoguardian.billing.webhook")
 
 WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 DEFAULT_SIGNATURE_TOLERANCE_SECONDS = 300
@@ -99,7 +102,14 @@ async def handle_stripe_webhook(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=f"invalid JSON: {exc}") from exc
 
     event_type = event.get("type", "")
+    event_id = event.get("id", "")
     data = event.get("data", {}).get("object", {})
+
+    # Idempotency: skip events already processed. A replayed-but-fresh event
+    # still passes signature/tolerance checks, so we key on Stripe's event id to
+    # avoid duplicate side effects (e.g. a second welcome API key).
+    if not db.claim_webhook_event(event_id, event_type=event_type):
+        return {"received": True, "type": event_type, "duplicate": True}
 
     handler = _HANDLERS.get(event_type)
     result = handler(data) if handler is not None else {"ignored": True, "type": event_type}
@@ -173,6 +183,18 @@ def _on_subscription_change(sub: dict[str, Any]) -> dict[str, Any]:
     db.set_customer_tier(customer.id, tier)
     period_start = sub.get("current_period_start")
     period_end = sub.get("current_period_end")
+    if not (period_start and period_end):
+        # Stripe API 2025-03+ moved the billing period onto subscription items.
+        items = (sub.get("items") or {}).get("data") or []
+        if items:
+            period_start = items[0].get("current_period_start")
+            period_end = items[0].get("current_period_end")
+    if not (period_start and period_end):
+        logger.warning(
+            "subscription_period_missing",
+            stripe_subscription_id=sub.get("id"),
+            note="no current_period_* at top level or on items; subscription row not upserted",
+        )
     if period_start and period_end:
         db.upsert_subscription(
             customer_id=customer.id,

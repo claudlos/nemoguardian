@@ -82,6 +82,56 @@ def test_aggregate_categories_dedup():
     assert out.categories.count("Violent") == 1
 
 
+def test_aggregate_all_errored_fails_closed_by_default():
+    out = aggregate(
+        {
+            "qwen3_guard_gen": _mv("q", "safe", 0.0, error="oom"),
+            "nemotron_csr": _mv("c", "safe", 0.0, error="parse"),
+        }
+    )
+    assert out.verdict == VerdictLabel.UNSAFE
+    assert out.score == 1.0
+    assert any("fail-closed" in r for r in out.reasons)
+
+
+def test_aggregate_all_errored_fail_open_opt_in():
+    from nemoguardian.aggregator import AggregatorConfig
+
+    out = aggregate(
+        {
+            "qwen3_guard_gen": _mv("q", "safe", 0.0, error="oom"),
+            "nemotron_csr": _mv("c", "safe", 0.0, error="parse"),
+        },
+        config=AggregatorConfig(fail_mode="open"),
+    )
+    assert out.verdict == VerdictLabel.SAFE
+    assert out.score == 0.0
+
+
+def test_aggregate_empty_verdicts_fails_closed():
+    out = aggregate({})
+    assert out.verdict == VerdictLabel.UNSAFE
+
+
+def test_aggregate_fail_mode_env(monkeypatch):
+    monkeypatch.setenv("NEMOGUARDIAN_FAIL_MODE", "open")
+    out = aggregate({})
+    assert out.verdict == VerdictLabel.SAFE
+    monkeypatch.setenv("NEMOGUARDIAN_FAIL_MODE", "bogus")
+    assert aggregate({}).verdict == VerdictLabel.UNSAFE
+
+
+def test_aggregate_boundary_exactly_070_is_controversial():
+    # Strict > on thresholds: a weighted mean of exactly 0.70 stays CONTROVERSIAL.
+    out = aggregate(
+        {
+            "qwen3_guard_gen": _mv("q", "controversial", 0.7),
+            "nemotron_csr": _mv("c", "controversial", 0.7),
+        }
+    )
+    assert out.verdict == VerdictLabel.CONTROVERSIAL
+
+
 def test_aggregate_with_triage_deep_mode():
     out = aggregate(
         {

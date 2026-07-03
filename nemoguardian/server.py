@@ -89,11 +89,31 @@ app = FastAPI(
     version="0.1.0",
 )
 
+
+def _cors_origins() -> list[str]:
+    """Parse NEMOGUARDIAN_CORS_ORIGINS (comma-separated) into an allowlist.
+
+    The demo console is served same-origin from /demo, so the API needs no
+    cross-origin access in a normal self-hosted deploy. Unset = deny all
+    cross-origin requests; "*" is retained only as an explicit, logged opt-in.
+    """
+    raw = os.environ.get("NEMOGUARDIAN_CORS_ORIGINS", "").strip()
+    if not raw:
+        return []
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    if "*" in origins:
+        logger.warning(
+            "cors_wildcard_enabled",
+            note="NEMOGUARDIAN_CORS_ORIGINS=* permits any origin; do not ship this.",
+        )
+    return origins
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins(),
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 
@@ -156,8 +176,7 @@ async def moderate(
     try:
         result = await asyncio.to_thread(cascade.moderate, request, policy_engine=policy_engine)
     except Exception as exc:
-        logger.exception("moderation_failed", error=str(exc))
-        raise HTTPException(500, f"moderation failed: {exc}") from exc
+        raise _client_error(500, what="moderation_failed", exc=exc) from exc
 
     billing_metered.report_usage(
         auth.customer.id,
@@ -188,8 +207,7 @@ async def demo_moderate(
     try:
         return await asyncio.to_thread(cascade.moderate, request, policy_engine=policy_engine)
     except Exception as exc:
-        logger.exception("demo_moderation_failed", error=str(exc))
-        raise HTTPException(500, f"demo moderation failed: {exc}") from exc
+        raise _client_error(500, what="demo_moderation_failed", exc=exc) from exc
 
 
 @app.post("/v1/moderate/stream")
@@ -217,16 +235,22 @@ async def moderate_stream(
 
     cascade = get_cascade()
     request_id = f"stream_{uuid4().hex}"
-    billing_metered.report_usage(
-        auth.customer.id,
-        call_type="stream",
-        request_id=request_id,
-    )
 
     async def gen():
         start = dt.datetime.now()
+        severity = {"safe": 0, "controversial": 1, "unsafe": 2}
+        worst_label = "safe"
+        worst_score = 0.0
+        emitted_tokens = False
         try:
             for label, score, idx in cascade.stream_token_verdicts(request.text):
+                emitted_tokens = True
+                label_str = label.value if hasattr(label, "value") else str(label)
+                if severity.get(label_str, 0) > severity[worst_label]:
+                    worst_label = label_str
+                    worst_score = score
+                elif label_str == worst_label:
+                    worst_score = max(worst_score, score)
                 chunk = StreamChunk(
                     token_index=idx,
                     partial_text=request.text[: idx + 1],
@@ -241,8 +265,8 @@ async def moderate_stream(
             terminal = StreamChunk(
                 token_index=len(request.text),
                 partial_text=request.text,
-                verdict_so_far="safe",
-                score_so_far=0.0,
+                verdict_so_far=worst_label,
+                score_so_far=worst_score,
                 is_terminal=True,
                 latency_ms=elapsed_ms,
             )
@@ -252,11 +276,20 @@ async def moderate_stream(
             yield StreamChunk(
                 token_index=0,
                 partial_text=request.text,
-                verdict_so_far="safe",
-                score_so_far=0.0,
+                verdict_so_far=worst_label,
+                score_so_far=worst_score,
                 is_terminal=True,
                 latency_ms=0.0,
             ).model_dump_json() + "\n"
+        finally:
+            # Bill only for work actually delivered (any tokens streamed),
+            # including partially-streamed requests that then errored.
+            if emitted_tokens:
+                billing_metered.report_usage(
+                    auth.customer.id,
+                    call_type="stream",
+                    request_id=request_id,
+                )
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")
 
@@ -289,6 +322,21 @@ def _demo_endpoint_enabled() -> bool:
         "yes",
         "on",
     }
+
+
+def _client_error(status_code: int, *, what: str, exc: BaseException) -> HTTPException:
+    """Log the full exception server-side and return a generic client error.
+
+    Raw exception text can leak filesystem paths, HF repo ids, CUDA errors, or
+    provider payloads. We keep those in the logs (via logger.exception) and hand
+    the caller a stable message plus a correlation id they can quote in a report.
+    """
+    correlation = uuid4().hex[:12]
+    logger.exception(what, error=str(exc), correlation=correlation)
+    return HTTPException(
+        status_code,
+        detail={"error": what, "correlation_id": correlation},
+    )
 
 
 __all__ = ["app"]
@@ -387,7 +435,7 @@ async def billing_provision(
     job = await billing_provisioning.provision_instance(
         customer_id=auth.customer.id,
         provider=req.provider,
-        ssh_public_key=req.ssh_public_key,
+        ssh_public_key=billing_provisioning.validate_ssh_public_key(req.ssh_public_key),
     )
     return ProvisioningResponse(job_id=job.id, status=job.status)
 
@@ -438,7 +486,6 @@ def _reset_billing_db_for_tests() -> None:
 
     _db._conn = None
     _db.init_db()
-    _db.init_db(_db.DEFAULT_DB_PATH)
 
 
 # --- Provider catalog + cost comparison -----------------------------------
@@ -504,17 +551,16 @@ async def billing_provision_cheapest(
         "NEMOGUARDIAN_API_KEY": auth.raw_key,
         "STRIPE_CUSTOMER_ID": auth.customer.stripe_customer_id or "",
         "NEMOGUARDIAN_CUSTOMER_ID": str(auth.customer.id),
-        "CASCADE_MODE": "standard",
     }
     try:
         offer, instance = await provision_cheapest_fit(
-            ssh_public_key=ssh_public_key,
+            ssh_public_key=billing_provisioning.validate_ssh_public_key(ssh_public_key),
             image=image,
             env=env,
             max_price_usd=max_price_usd,
         )
     except Exception as exc:
-        raise HTTPException(502, f"provisioning failed: {exc}") from exc
+        raise _client_error(502, what="provisioning_failed", exc=exc) from exc
 
     # Persist the job so the customer can poll status.
     provider_enum = ProviderName(offer.provider.value)
@@ -574,14 +620,16 @@ async def billing_provision_specific(
         "NEMOGUARDIAN_API_KEY": auth.raw_key,
         "STRIPE_CUSTOMER_ID": auth.customer.stripe_customer_id or "",
         "NEMOGUARDIAN_CUSTOMER_ID": str(auth.customer.id),
-        "CASCADE_MODE": "standard",
     }
     try:
         instance = await provider.provision(
-            offer, ssh_public_key=ssh_public_key, image=image, env=env,
+            offer,
+            ssh_public_key=billing_provisioning.validate_ssh_public_key(ssh_public_key),
+            image=image,
+            env=env,
         )
     except ProvisionError as exc:
-        raise HTTPException(502, f"{provider_name} provisioning failed: {exc}") from exc
+        raise _client_error(502, what=f"{provider_name}_provisioning_failed", exc=exc) from exc
 
     job = billing_db.create_provisioning_job(
         customer_id=auth.customer.id, tier=auth.plan.tier, provider=provider_name,

@@ -1,0 +1,61 @@
+name: Feature request
+description: Suggest a new moderation mode, adapter, provider integration, or policy preset.
+title: "[feat] "
+labels: ["enhancement", "triage"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tell us what you want and why. We review feature requests weekly during the hackathon.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What user-facing problem does this solve? Who has this problem today?
+      placeholder: |
+        Discord moderators want a way to escalate flagged messages to a human reviewer without leaving the channel.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How should it work? Which files / routes / configs change?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What else did you consider? Why is your proposal better?
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Cascade / aggregator
+        - Model integration
+        - Policy / presets
+        - Billing / plans
+        - Provider / deployment
+        - Adapter (Discord/Twitch/webhook)
+        - Demo UI / frontend
+        - Docs / devx
+        - Security
+    validations:
+      required: true
+
+  - type: textarea
+    id: will-PR
+    attributes:
+      label: Will you open a PR?
+      options:
+        - Yes, I can implement this
+        - Maybe — happy to review a PR
+        - No, just suggesting
+    validations:
+      required: false

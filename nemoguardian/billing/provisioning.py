@@ -16,8 +16,11 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import secrets
 from typing import Literal
+
+from fastapi import HTTPException
 
 from nemoguardian.billing import db
 from nemoguardian.billing.plans import Tier
@@ -27,6 +30,42 @@ Provider = Literal["vastai", "digitalocean", "lambda", "on_prem"]
 
 SUPPORTED_PROVIDERS: list[Provider] = ["vastai", "digitalocean", "lambda", "on_prem"]
 _BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
+
+# Acceptable SSH public-key types and a base64 body. Reject anything with shell
+# metacharacters, quotes, or newlines so the value can never break out of the
+# snippet we hand back to the customer.
+_SSH_KEY_RE = re.compile(
+    r"^(ssh-(rsa|ed25519)|ecdsa-sha2-nistp(256|384|521)|sk-(ssh-ed25519|ecdsa-sha2-nistp256))"
+    r" [A-Za-z0-9+/=]+( .*)?$"
+)
+
+
+def validate_ssh_public_key(key: str | None) -> str | None:
+    """Validate a caller-supplied SSH public key or raise 400.
+
+    Returns the key unchanged if valid, or None if the caller omitted it.
+    Rejects keys with shell metacharacters, quotes, or newlines so the value is
+    always safe to interpolate into the copy-paste snippet we return.
+    """
+    if key is None:
+        return None
+    key = key.strip()
+    if not key:
+        return None
+    if "\n" in key or "\r" in key or "'" in key or '"' in key or "`" in key or "$" in key:
+        raise HTTPException(
+            status_code=400,
+            detail="ssh_public_key must be a single line without quotes or shell metacharacters",
+        )
+    if not _SSH_KEY_RE.match(key):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "ssh_public_key must be a single OpenSSH public key "
+                "(e.g. 'ssh-ed25519 AAAA... comment')"
+            ),
+        )
+    return key
 
 
 async def provision_instance(
@@ -84,13 +123,20 @@ async def _run_job(job_id: int, provider: Provider, ssh_public_key: str | None) 
 
 
 def _render_onprem_snippet(ssh_public_key: str | None) -> str:
-    """A docker-compose snippet the user runs locally."""
+    """A docker-compose snippet the user runs locally.
+
+    The SSH key is validated upstream (validate_ssh_public_key) and rendered via
+    a quoted heredoc so that even a malformed value cannot break the command the
+    user is told to paste.
+    """
     key_block = ssh_public_key or "<paste your SSH public key>"
     return (
         "# 1. Drop this in a fresh directory on your machine\n"
         "mkdir nemoguardian-self-hosted && cd nemoguardian-self-hosted\n\n"
         "# 2. Save your SSH public key\n"
-        f"echo '{key_block}' > authorized_keys\n\n"
+        "cat > authorized_keys <<'NEMOGUARDIAN_EOF'\n"
+        f"{key_block}\n"
+        "NEMOGUARDIAN_EOF\n\n"
         "# 3. Pull and run\n"
         "docker compose up -d\n\n"
         "# 4. Verify\n"

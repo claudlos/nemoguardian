@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" role="img" aria-label="nemoguardian — multi-model LLM moderation cascade">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b0b0a"/>
+      <stop offset="60%" stop-color="#0b0b0a"/>
+      <stop offset="100%" stop-color="#15200a"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#76B900"/>
+      <stop offset="100%" stop-color="#9bd83a"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.7" cy="0.2" r="0.7">
+      <stop offset="0%" stop-color="rgba(118,185,0,0.18)"/>
+      <stop offset="100%" stop-color="rgba(118,185,0,0)"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <rect width="1280" height="640" fill="url(#glow)"/>
+
+  <!-- grid lines -->
+  <g stroke="#1a1a17" stroke-width="1">
+    <line x1="0" y1="160" x2="1280" y2="160"/>
+    <line x1="0" y1="320" x2="1280" y2="320"/>
+    <line x1="0" y1="480" x2="1280" y2="480"/>
+    <line x1="320" y1="0" x2="320" y2="640"/>
+    <line x1="640" y1="0" x2="640" y2="640"/>
+    <line x1="960" y1="0" x2="960" y2="640"/>
+  </g>
+
+  <!-- logo mark -->
+  <g transform="translate(80, 80)">
+    <rect width="72" height="72" rx="16" fill="url(#green)"/>
+    <path d="M22 30C22 25.6 25.6 22 30 22H37V33H27V38H37V50H30C25.6 50 22 46.4 22 42V30Z" fill="#0b0b0a"/>
+    <path d="M42 22H49C53.4 22 57 25.6 57 30V42C57 46.4 53.4 50 49 50H42V22ZM49 33H52V30H49V33Z" fill="#0b0b0a"/>
+  </g>
+
+  <!-- brand -->
+  <text x="172" y="130" font-family="Inter, system-ui, sans-serif" font-size="44" font-weight="800" fill="#ecebe5" letter-spacing="-1">
+    nemo<tspan fill="#76B900">guardian</tspan>
+  </text>
+
+  <!-- headline -->
+  <text x="80" y="270" font-family="Inter, system-ui, sans-serif" font-size="68" font-weight="800" fill="#ecebe5" letter-spacing="-2">
+    Multi-model LLM moderation,
+  </text>
+  <text x="80" y="350" font-family="Inter, system-ui, sans-serif" font-size="68" font-weight="800" fill="#76B900" letter-spacing="-2">
+    plug-and-play.
+  </text>
+
+  <!-- subhead -->
+  <text x="80" y="420" font-family="Inter, system-ui, sans-serif" font-size="22" fill="#aaa79b">
+    Qwen3Guard + NVIDIA Nemotron cascade · FastAPI · Stripe · self-hosted Docker
+  </text>
+  <text x="80" y="452" font-family="Inter, system-ui, sans-serif" font-size="22" fill="#aaa79b">
+    Commodity GPUs from $0.07/hr · Apache 2.0
+  </text>
+
+  <!-- cascade chips -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">
+    <g transform="translate(80, 510)">
+      <rect width="220" height="44" rx="10" fill="#181816" stroke="#2c2c27"/>
+      <circle cx="20" cy="22" r="5" fill="#5ca6b8"/>
+      <text x="38" y="28" fill="#ecebe5">Qwen3Guard-Stream</text>
+    </g>
+    <g transform="translate(316, 510)">
+      <rect width="220" height="44" rx="10" fill="#181816" stroke="#2c2c27"/>
+      <circle cx="20" cy="22" r="5" fill="#76B900"/>
+      <text x="38" y="28" fill="#ecebe5">Qwen3Guard-Gen 4B</text>
+    </g>
+    <g transform="translate(552, 510)">
+      <rect width="280" height="44" rx="10" fill="#181816" stroke="#2c2c27"/>
+      <circle cx="20" cy="22" r="5" fill="#76B900"/>
+      <text x="38" y="28" fill="#ecebe5">Nemotron-CSR 4B</text>
+    </g>
+    <g transform="translate(848, 510)">
+      <rect width="320" height="44" rx="10" fill="#181816" stroke="#2c2c27"/>
+      <circle cx="20" cy="22" r="5" fill="#d4a23c"/>
+      <text x="38" y="28" fill="#ecebe5">Nemotron 3 Ultra (deep)</text>
+    </g>
+  </g>
+
+  <!-- footer -->
+  <text x="80" y="600" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14" fill="#7d7a6e">
+    github.com/claudlos/nemoguardian
+  </text>
+  <text x="1200" y="600" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14" fill="#7d7a6e">
+    Apache 2.0
+  </text>
+</svg>
