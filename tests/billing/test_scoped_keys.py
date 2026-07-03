@@ -13,13 +13,9 @@ from nemoguardian.billing.plans import Tier
 
 
 @pytest.fixture(autouse=True)
-def isolated_db(monkeypatch, tmp_path):
-    db_path = tmp_path / "nmg_scope_test.db"
-    monkeypatch.setenv("NEMOGUARDIAN_DB_PATH", str(db_path))
-    db._conn = None
-    db.init_db(str(db_path))
+def _isolated_db(isolated_db):
+    """Fresh SQLite DB per test (shared fixture from conftest)."""
     yield
-    db._conn = None
 
 
 def _self_hosted_customer():
