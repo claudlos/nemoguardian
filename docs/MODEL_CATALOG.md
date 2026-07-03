@@ -8,6 +8,22 @@
 
 ---
 
+## Contents
+
+- [TL;DR — Summary Table](#tldr--summary-table)
+- [1. Qwen3Guard (Gen + Stream, 0.6B / 4B / 8B)](#1-qwen3guard-gen--stream-06b--4b--8b)
+- [2. NVIDIA Nemotron Content Safety family](#2-nvidia-nemotron-content-safety-family)
+- [3. NeMo Guardrails (orchestration runtime, not a model)](#3-nemo-guardrails-orchestration-runtime-not-a-model)
+- [4. Meta Llama Guard family](#4-meta-llama-guard-family)
+- [5. IBM Granite Guardian 4.1](#5-ibm-granite-guardian-41)
+- [6. Other entrants (closed / API-only / 2026 deprecations)](#6-other-entrants-closed--api-only--2026-deprecations)
+- [7. VRAM Quick-Reference](#7-vram-quick-reference-fp16-baseline-int8--half-4-bit--quarter)
+- [8. Recommended nemoguardian Cascade](#8-recommended-nemoguardian-cascade)
+- [9. License summary (red flags only)](#9-license-summary-red-flags-only)
+- [10. References (sources used)](#10-references-sources-used)
+
+---
+
 ## TL;DR — Summary Table
 
 | Model | Params | Context | License | Best Mode | FP16 VRAM (≈) | Fits 4 GB? |
