@@ -36,11 +36,15 @@ _REFUSAL_RE = re.compile(r"Refusal: (Yes|No)")
 
 def _parse_gen_output(text: str) -> dict[str, Any]:
     label_match = _LABEL_RE.search(text)
+    if label_match is None:
+        # A silent "Safe" default here would let format drift cast a real SAFE
+        # vote. Raising turns it into an error verdict, which the aggregator
+        # excludes (and escalates to CONTROVERSIAL if every vote is dropped).
+        raise ValueError(f"unparseable Qwen3Guard output: {text[:200]!r}")
     categories = _CATEGORY_RE.findall(text)
     refusal_match = _REFUSAL_RE.search(text)
-    label = label_match.group(1) if label_match else "Safe"
     return {
-        "label": label,
+        "label": label_match.group(1),
         "categories": [c for c in categories if c != "None"],
         "refusal": refusal_match.group(1) if refusal_match else None,
     }

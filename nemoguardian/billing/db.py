@@ -20,9 +20,22 @@ from pathlib import Path
 
 from nemoguardian.billing.plans import Tier, get_plan
 
-DEFAULT_DB_PATH = Path(
-    os.environ.get("NEMOGUARDIAN_DB_PATH", "/tmp/nemoguardian.db")
-)
+
+def default_db_path() -> Path:
+    """Resolve the DB path lazily so env changes (tests, late config) apply.
+
+    Outside Docker the DB holds API-key hashes, so it must not live in a
+    world-readable location like /tmp (NMG-007).
+    """
+    env = os.environ.get("NEMOGUARDIAN_DB_PATH")
+    if env:
+        return Path(env)
+    return Path.home() / ".nemoguardian" / "nemoguardian.db"
+
+
+# Backward-compatible snapshot (used by the test-reset helper). Prefer
+# default_db_path() everywhere else — it re-reads the env each call.
+DEFAULT_DB_PATH = default_db_path()
 
 
 SCHEMA = """
@@ -111,16 +124,29 @@ _lock = threading.Lock()
 _conn: sqlite3.Connection | None = None
 
 
-def init_db(path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
+def init_db(path: Path | str | None = None) -> sqlite3.Connection:
     """Initialise the database (idempotent). Returns a connection."""
     global _conn
-    path = Path(path)
+    explicit = path is not None or bool(os.environ.get("NEMOGUARDIAN_DB_PATH"))
+    path = Path(path) if path is not None else default_db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Tighten permissions on the directory we own; leave operator-chosen
+    # locations (env/explicit path) alone.
+    if os.name == "posix" and not explicit:
+        os.chmod(path.parent, 0o700)
     with _lock:
         if _conn is None:
             _conn = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
+            if os.name == "posix":
+                os.chmod(path, 0o600)
             _conn.row_factory = sqlite3.Row
-            _conn.executescript("PRAGMA foreign_keys = ON;")
+            # WAL tolerates concurrent readers while a write commits; busy_timeout
+            # makes writers wait briefly instead of erroring under contention.
+            _conn.executescript(
+                "PRAGMA foreign_keys = ON;"
+                "PRAGMA journal_mode = WAL;"
+                "PRAGMA busy_timeout = 5000;"
+            )
             _conn.executescript(SCHEMA)
         return _conn
 

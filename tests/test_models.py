@@ -278,11 +278,12 @@ def test_qwen_parse_gen_output_extracts_label_categories_and_refusal():
         "categories": ["PII", "Jailbreak"],
         "refusal": "Yes",
     }
-    assert _parse_gen_output("no structured output") == {
-        "label": "Safe",
-        "categories": [],
-        "refusal": None,
-    }
+    # Format drift must NOT silently vote Safe — it raises, which the caller
+    # turns into an error verdict the aggregator drops (fail-closed contract).
+    import pytest
+
+    with pytest.raises(ValueError, match="unparseable"):
+        _parse_gen_output("no structured output")
 
 
 def test_qwen_gen_loads_fake_model_and_parses_response(monkeypatch):

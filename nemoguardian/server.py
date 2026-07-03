@@ -50,7 +50,7 @@ from nemoguardian.providers import (
 )
 from nemoguardian.providers import ops as providers_ops
 from nemoguardian.providers.base import CASCADE_VRAM_COMFORT_GB
-from nemoguardian.providers.registry import default_registry as providers_registry
+from nemoguardian.providers.registry import get_registry as providers_registry
 from nemoguardian.schemas import (
     HealthResponse,
     ModerateRequest,
@@ -545,7 +545,6 @@ async def billing_provision(
         "NEMOGUARDIAN_API_KEY": auth.raw_key,
         "STRIPE_CUSTOMER_ID": auth.customer.stripe_customer_id or "",
         "NEMOGUARDIAN_CUSTOMER_ID": str(auth.customer.id),
-        "CASCADE_MODE": "standard",
     }
     job = await billing_provisioning.provision_instance_guarded(
         customer_id=auth.customer.id,
@@ -766,7 +765,6 @@ async def billing_provision_cheapest(
         "NEMOGUARDIAN_API_KEY": auth.raw_key,
         "STRIPE_CUSTOMER_ID": auth.customer.stripe_customer_id or "",
         "NEMOGUARDIAN_CUSTOMER_ID": str(auth.customer.id),
-        "CASCADE_MODE": "standard",
     }
     try:
         instance = await providers_registry().get(offer.provider).provision(
@@ -870,7 +868,6 @@ async def billing_provision_specific(
         "NEMOGUARDIAN_API_KEY": auth.raw_key,
         "STRIPE_CUSTOMER_ID": auth.customer.stripe_customer_id or "",
         "NEMOGUARDIAN_CUSTOMER_ID": str(auth.customer.id),
-        "CASCADE_MODE": "standard",
     }
     try:
         instance = await provider.provision(

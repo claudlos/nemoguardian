@@ -58,7 +58,7 @@ dev = [
 gpu = ["vllm>=0.4.6.post1"]
 
 [project.scripts]
-nemoguardian = "nemoguardian.cli:main"
+nemoguardian = "nemoguardian.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/claudlos/nemoguardian"
